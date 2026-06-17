@@ -1,0 +1,44 @@
+# dependencies
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# coverage
+coverage/
+.nyc_output/
+
+# logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# runtime
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# test
+junit.xml
+test-report.xml

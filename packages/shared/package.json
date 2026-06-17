@@ -1,0 +1,12 @@
+{
+  "name": "@interior/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared types and constants across apps (placeholder for F1+)",
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "echo 'Shared scaffold pending' && exit 0",
+    "typecheck": "echo 'Shared scaffold pending' && exit 0",
+    "test": "echo 'Shared scaffold pending' && exit 0"
+  }
+}

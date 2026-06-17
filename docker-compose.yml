@@ -1,0 +1,67 @@
+name: interior-ai
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: interior-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: interior
+      POSTGRES_PASSWORD: interior
+      POSTGRES_DB: interior
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U interior -d interior"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile.dev
+    container_name: interior-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      LOG_LEVEL: debug
+      DATABASE_URL: postgresql://interior:interior@postgres:5432/interior?schema=public
+      SESSION_COOKIE_NAME: sid
+      SESSION_COOKIE_SECRET: dev-only-secret-please-change-in-production-32chars
+      CORS_ORIGINS: http://localhost:5173
+      AI_PROVIDER: ${AI_PROVIDER:-pollinations}
+      AI_PRIMARY_BASE_URL: ${AI_PRIMARY_BASE_URL:-https://image.pollinations.ai}
+      AI_FALLBACK_BASE_URL: ${AI_FALLBACK_BASE_URL:-https://api.myceli.ai}
+      AI_PRIMARY_API_KEY: ${AI_PRIMARY_API_KEY:-}
+      AI_FALLBACK_API_KEY: ${AI_FALLBACK_API_KEY:-}
+      GENERATION_TIMEOUT_MS: 60000
+      GENERATION_HARD_TIMEOUT_MS: 90000
+      STORAGE_PROVIDER: supabase
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-interior-dev}
+      SIGNED_URL_TTL_SECONDS: 900
+      RATE_LIMIT_PER_SESSION_PER_MIN: 10
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/backend/src:/repo/apps/backend/src:ro
+
+  frontend:
+    image: alpine:3.19
+    container_name: interior-frontend-placeholder
+    restart: unless-stopped
+    command: ["sh", "-c", "echo 'Frontend scaffold lands in F1' && tail -f /dev/null"]
+    ports:
+      - "5173:5173"
+
+volumes:
+  postgres-data:

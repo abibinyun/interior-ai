@@ -1,0 +1,13 @@
+{
+  "name": "@interior/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend placeholder (real scaffolding comes in F1)",
+  "scripts": {
+    "dev": "echo 'Frontend scaffold lands in F1' && exit 0",
+    "build": "echo 'Frontend scaffold lands in F1' && exit 0",
+    "lint": "echo 'Frontend scaffold lands in F1' && exit 0",
+    "typecheck": "echo 'Frontend scaffold lands in F1' && exit 0",
+    "test": "echo 'Frontend scaffold lands in F1' && exit 0"
+  }
+}

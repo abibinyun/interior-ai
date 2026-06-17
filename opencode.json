@@ -1,0 +1,264 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "tokenrouter": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "TokenRouter",
+      "options": {
+        "baseURL": "https://api.tokenrouter.com/v1",
+        "apiKey": "sk-5RTdYD2pnpPIW0AjjRnu6evUbrV0AS6W87YRlWhK1HWBa51D"
+      },
+      "models": {
+        "gpt-5.4-nano": {
+          "name": "openai/gpt-5.4-nano"
+        },
+        "qwen/qwen3.5-9b": {
+          "name": "qwen/qwen3.5-9b"
+        },
+        "qwen/qwen3.7-max": {
+          "name": "qwen/qwen3.7-max"
+        },
+        "deepseek/deepseek-v4-pro": {
+          "name": "deepseek/deepseek-v4-pro"
+        },
+        "MiniMax-M3": {
+          "name": "MiniMax-M3"
+        },
+        "miromind/mirothinker-1-7-deepresearch": {
+          "name": "miromind/mirothinker-1-7-deepresearch"
+        },
+        "qwen/qwen3.5-plus-02-15": {
+          "name": "qwen/qwen3.5-plus-02-15"
+        },
+        "x-ai/grok-4.20-beta": {
+          "name": "x-ai/grok-4.20-beta"
+        },
+        "anthropic/claude-opus-4.8-fast": {
+          "name": "anthropic/claude-opus-4.8-fast"
+        },
+        "gpt-5.2": {
+          "name": "openai/gpt-5.2"
+        },
+        "deepseek/deepseek-v3.2": {
+          "name": "deepseek/deepseek-v3.2"
+        },
+        "anthropic/claude-sonnet-4.5": {
+          "name": "anthropic/claude-sonnet-4.5"
+        },
+        "stepfun/step-3.5-flash": {
+          "name": "stepfun/step-3.5-flash"
+        },
+        "z-ai/glm-5-turbo": {
+          "name": "z-ai/glm-5-turbo"
+        },
+        "qwen3.6-flash": {
+          "name": "qwen3.6-flash"
+        },
+        "qwen/qwen3.5-397b-a17b": {
+          "name": "qwen/qwen3.5-397b-a17b"
+        },
+        "anthropic/claude-sonnet-4": {
+          "name": "anthropic/claude-sonnet-4"
+        },
+        "tencent/hy3-preview": {
+          "name": "tencent/hy3-preview"
+        },
+        "z-ai/glm-5.1": {
+          "name": "z-ai/glm-5.1"
+        },
+        "seed-2-0-pro-260328": {
+          "name": "seed-2-0-pro-260328"
+        },
+        "qwen3.5-omni-plus": {
+          "name": "qwen3.5-omni-plus"
+        },
+        "moonshotai/kimi-k2.7-code": {
+          "name": "moonshotai/kimi-k2.7-code"
+        },
+        "anthropic/claude-haiku-4.5": {
+          "name": "anthropic/claude-haiku-4.5"
+        },
+        "xiaomi/mimo-v2-pro": {
+          "name": "xiaomi/mimo-v2-pro"
+        },
+        "z-ai/glm-4.6v": {
+          "name": "z-ai/glm-4.6v"
+        },
+        "google/gemini-3-pro-image-preview": {
+          "name": "google/gemini-3-pro-image-preview"
+        },
+        "google/gemini-3.1-flash-image-preview": {
+          "name": "google/gemini-3.1-flash-image-preview"
+        },
+        "anthropic/claude-opus-4.6": {
+          "name": "anthropic/claude-opus-4.6"
+        },
+        "z-ai/glm-5.2": {
+          "name": "z-ai/glm-5.2"
+        },
+        "gpt-oss-120b": {
+          "name": "openai/gpt-oss-120b"
+        },
+        "x-ai/grok-4.1-fast": {
+          "name": "x-ai/grok-4.1-fast"
+        },
+        "seed-2-0-mini-260428": {
+          "name": "seed-2-0-mini-260428"
+        },
+        "qwen/qwen3-coder-next": {
+          "name": "qwen/qwen3-coder-next"
+        },
+        "seed-2-0-code-preview-260328": {
+          "name": "seed-2-0-code-preview-260328"
+        },
+        "google/gemini-3.1-pro-preview": {
+          "name": "google/gemini-3.1-pro-preview"
+        },
+        "xiaomi/mimo-v2-flash": {
+          "name": "xiaomi/mimo-v2-flash"
+        },
+        "z-ai/glm-4.5-air": {
+          "name": "z-ai/glm-4.5-air"
+        },
+        "gpt-5.4-mini": {
+          "name": "openai/gpt-5.4-mini"
+        },
+        "mistralai/voxtral-small-24b-2507": {
+          "name": "mistralai/voxtral-small-24b-2507"
+        },
+        "gpt-5.5-pro": {
+          "name": "openai/gpt-5.5-pro"
+        },
+        "nvidia/nemotron-3-super-120b-a12b": {
+          "name": "nvidia/nemotron-3-super-120b-a12b"
+        },
+        "minimax/minimax-m2-her": {
+          "name": "minimax/minimax-m2-her"
+        },
+        "google/gemini-3.5-flash": {
+          "name": "google/gemini-3.5-flash"
+        },
+        "xiaomi/mimo-v2.5-pro": {
+          "name": "xiaomi/mimo-v2.5-pro"
+        },
+        "minimax/minimax-m2.7-highspeed": {
+          "name": "minimax/minimax-m2.7-highspeed"
+        },
+        "miromind/mirothinker-1-7-deepresearch-mini": {
+          "name": "miromind/mirothinker-1-7-deepresearch-mini"
+        },
+        "qwen/qwen3.5-122b-a10b": {
+          "name": "qwen/qwen3.5-122b-a10b"
+        },
+        "minimax/minimax-m2.7": {
+          "name": "minimax/minimax-m2.7"
+        },
+        "xiaomi/mimo-v2.5": {
+          "name": "xiaomi/mimo-v2.5"
+        },
+        "mistralai/mistral-medium-3-5": {
+          "name": "mistralai/mistral-medium-3-5"
+        },
+        "qwen/qwen3.7-plus": {
+          "name": "qwen/qwen3.7-plus"
+        },
+        "qwen/qwen3.5-35b-a3b": {
+          "name": "qwen/qwen3.5-35b-a3b"
+        },
+        "anthropic/claude-opus-4.7": {
+          "name": "anthropic/claude-opus-4.7"
+        },
+        "google/gemini-3-flash-preview": {
+          "name": "google/gemini-3-flash-preview"
+        },
+        "google/gemma-4-26b-a4b-it": {
+          "name": "google/gemma-4-26b-a4b-it"
+        },
+        "stepfun/step-3.7-flash": {
+          "name": "stepfun/step-3.7-flash"
+        },
+        "anthropic/claude-opus-4.5": {
+          "name": "anthropic/claude-opus-4.5"
+        },
+        "mistralai/devstral-2512": {
+          "name": "mistralai/devstral-2512"
+        },
+        "x-ai/grok-4.3": {
+          "name": "x-ai/grok-4.3"
+        },
+        "anthropic/claude-opus-4.7-fast": {
+          "name": "anthropic/claude-opus-4.7-fast"
+        },
+        "x-ai/grok-build-0.1": {
+          "name": "x-ai/grok-build-0.1"
+        },
+        "anthropic/claude-sonnet-4.6": {
+          "name": "anthropic/claude-sonnet-4.6"
+        },
+        "gpt-5.4": {
+          "name": "openai/gpt-5.4"
+        },
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
+          "name": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+        },
+        "deepseek/deepseek-v4-flash": {
+          "name": "deepseek/deepseek-v4-flash"
+        },
+        "gpt-4o-mini": {
+          "name": "openai/gpt-4o-mini"
+        },
+        "z-ai/glm-4.6": {
+          "name": "z-ai/glm-4.6"
+        },
+        "seed-2-0-lite-260428": {
+          "name": "seed-2-0-lite-260428"
+        },
+        "gpt-5.5": {
+          "name": "openai/gpt-5.5"
+        },
+        "z-ai/glm-4.7": {
+          "name": "z-ai/glm-4.7"
+        },
+        "moonshotai/kimi-k2.6": {
+          "name": "moonshotai/kimi-k2.6"
+        },
+        "google/gemini-2.5-flash-image": {
+          "name": "google/gemini-2.5-flash-image"
+        },
+        "qwen/qwen3.5-flash": {
+          "name": "qwen/qwen3.5-flash"
+        },
+        "moonshotai/kimi-k2.5": {
+          "name": "moonshotai/kimi-k2.5"
+        },
+        "minimax/minimax-m2.5": {
+          "name": "minimax/minimax-m2.5"
+        },
+        "qwen/qwen3.6-plus": {
+          "name": "qwen/qwen3.6-plus"
+        },
+        "xiaomi/mimo-v2-omni": {
+          "name": "xiaomi/mimo-v2-omni"
+        },
+        "gpt-5-mini": {
+          "name": "openai/gpt-5-mini"
+        },
+        "mistralai/mistral-small-2603": {
+          "name": "mistralai/mistral-small-2603"
+        },
+        "minimax/minimax-m2.1": {
+          "name": "minimax/minimax-m2.1"
+        },
+        "anthropic/claude-opus-4.8": {
+          "name": "anthropic/claude-opus-4.8"
+        },
+        "minimax/minimax-m2.1-highspeed": {
+          "name": "minimax/minimax-m2.1-highspeed"
+        },
+        "z-ai/glm-5": {
+          "name": "z-ai/glm-5"
+        }
+      }
+    }
+  }
+}

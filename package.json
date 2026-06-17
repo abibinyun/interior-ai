@@ -1,0 +1,21 @@
+{
+  "name": "interior-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI Interior Design Journey Builder",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:backend": "npm run start:dev --workspace=@interior/backend",
+    "dev:frontend": "npm run dev --workspace=@interior/frontend",
+    "build:backend": "npm run build --workspace=@interior/backend",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

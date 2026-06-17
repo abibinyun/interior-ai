@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1.6
+FROM node:20-alpine
+WORKDIR /repo
+
+RUN apk add --no-cache bash
+
+COPY package.json package-lock.json* ./
+COPY apps/backend/package.json ./apps/backend/package.json
+COPY packages/shared/package.json ./packages/shared/package.json
+RUN npm install --workspaces --include-workspace-root
+
+COPY apps/backend/tsconfig.json ./
+COPY apps/backend ./apps/backend
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start:dev", "--workspace=@interior/backend"]
