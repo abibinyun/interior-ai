@@ -110,6 +110,19 @@ export class GenerationsService {
     return items.map(this.serialize);
   }
 
+  async listByBatchIdInRoom(
+    roomId: string,
+    batchId: string,
+  ): Promise<SerializedGeneration[]> {
+    await this.requireOwnedRoom(roomId);
+    const items = await this.repo.findByBatchId(batchId);
+    const owned = items.filter((g) => g.roomId === roomId);
+    if (owned.length === 0) {
+      throw new NotFoundError('Batch not found in this room.');
+    }
+    return owned.map(this.serialize);
+  }
+
   async get(id: string): Promise<SerializedGeneration> {
     const gen = await this.repo.findById(id);
     if (!gen) throw new NotFoundError('Generation not found.');

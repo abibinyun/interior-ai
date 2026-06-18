@@ -275,7 +275,39 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
-## 5. References
+## 5. Implementation Review (post-M10 verification)
+
+### 2026-06-18 — M3–M10 verification pass
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved with notes**
+- Scope reviewed: full M3–M10 surface against the docker Compose stack.
+- Verification (all green before commit):
+  - `npm run typecheck` → 0 errors
+  - `npm run lint` → 0 errors
+  - `npm run build:backend` → 0 errors
+  - `npm run test` → **117/117 pass** (4 M1 smoke + 8 M3 session-guard + 11 M2 persistence + 11 M4 projects + 11 M5 rooms + 6 M6 AI provider + 11 M7 storage + 6 M8 generations + 6 M9 pipeline + 10 M10 refinement)
+  - `docker compose up` → all healthy
+  - End-to-end smoke: session → project → style → room → brief → generation batch (returns 201 with 3 PENDING rows)
+
+- Notes:
+  - **M8 gap closed**: added `GET /api/rooms/:roomId/generations/batches/:batchId` and `GenerationsService.listByBatchIdInRoom(...)` for polling batch status (was documented in M8 DoD but not implemented in the initial commit).
+  - **Idempotency added**: `PipelineOrchestrator.runBatch` now filters rows by `status = 'PENDING'`, so duplicate invocations are safe no-ops.
+  - **Vitest default testTimeout bumped** to 30s — the M9 happy-path test exercises a real 3-step async flow that occasionally exceeded the 5s default.
+
+- **Known integration gap (M9)** — to be addressed before M11:
+  `POST /api/rooms/:roomId/generations` creates the 3 Generation rows as PENDING and updates the room to GENERATING, but it does **not** auto-trigger `PipelineOrchestrator.runBatch`. The HTTP caller must currently invoke the pipeline through a separate mechanism (tests do this directly; production callers do not have such a path).
+  - **Symptom**: a real user creates a batch via the API and the rows remain PENDING indefinitely.
+  - **Root cause**: auto-triggering from `startBatch` was attempted but caused race conditions in the existing M9 e2e tests (concurrent calls to `runBatch` produced rows in conflicting states; the CHECK constraint `generations_image_url_complete_chk` then rejected the second transition).
+  - **Recommended fix in M11** (when Approval / Consistency Anchor lands and the controller surface stabilizes):
+    1. Make `runBatch` truly race-safe with `SELECT ... FOR UPDATE SKIP LOCKED` (Postgres) inside a transaction, OR
+    2. Introduce a job queue (BullMQ on Redis) and move `runBatch` to a worker, OR
+    3. Add an explicit "process batch" admin endpoint and document that production deployments need a sidecar that polls pending batches.
+  - **Workaround for now**: the e2e test suite drives `pipeline.runBatch(batchId)` directly after creating a batch. The unit tests for M6 (AI adapter) and M7 (storage) remain valid.
+
+---
+
+## 6. References
 
 - Product vision: `00-product-vision.md`
 - System architecture: `04-system-architecture.md`

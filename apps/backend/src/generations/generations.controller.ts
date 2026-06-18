@@ -34,4 +34,13 @@ export class GenerationsController {
     const items = await this.service.listByRoomId(roomId);
     return { items };
   }
+
+  @Get(':roomId/generations/batches/:batchId')
+  async getBatch(
+    @Param('roomId', new ParseUUIDPipe()) roomId: string,
+    @Param('batchId', new ParseUUIDPipe()) batchId: string,
+  ): Promise<{ batchId: string; items: unknown[] }> {
+    const items = await this.service.listByBatchIdInRoom(roomId, batchId);
+    return { batchId, items };
+  }
 }

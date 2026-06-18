@@ -48,8 +48,11 @@ export class PipelineOrchestrator {
   }
 
   async runBatch(batchId: string): Promise<PipelineResult> {
+    // Idempotency: only act on rows still in PENDING. If the caller
+    // (e.g. tests, or a duplicate trigger) invokes this twice, the second
+    // call is a no-op.
     const rows = await this.prisma.generation.findMany({
-      where: { batchId },
+      where: { batchId, status: 'PENDING' },
       orderBy: { optionIndex: 'asc' },
     });
     if (rows.length === 0) {

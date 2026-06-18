@@ -336,6 +336,38 @@ Generation endpoints are expensive (provider calls + storage upload). Without li
 - (+) Honest user-facing message; recovery path (wait) is clear.
 - (-) Adds a small amount of operational config.
 
+## ADR-014 — Generation Batch Trigger (deferred to M11)
+
+**Status**: Proposed (deferred)
+
+**Context**
+
+`POST /api/rooms/:roomId/generations` creates 3 PENDING Generation rows and updates the room to GENERATING, but does **not** auto-trigger `PipelineOrchestrator.runBatch`. As a result, real users see batches stuck in PENDING indefinitely. Tests drive `runBatch` directly so the bug is invisible in CI.
+
+**Options Considered**
+
+1. **Auto-trigger from `startBatch` as fire-and-forget** — caused test races and CHECK-constraint violations when `runBatch` was invoked concurrently from test and controller. Reverted.
+2. **Job queue (BullMQ on Redis)** — proper async; introduces Redis dependency (currently out of v1 stack).
+3. **`SELECT ... FOR UPDATE SKIP LOCKED`** — Postgres-native lock; makes `runBatch` safe under concurrent invocation without a queue.
+4. **Polling sidecar / cron** — explicit batch-processing worker process that scans PENDING batches; simple but adds an operational piece.
+
+**Decision**
+
+Defer. The most pragmatic in-scope fix is **Option 3** (transactional `SELECT ... FOR UPDATE SKIP LOCKED` inside `runBatch`), which:
+- Keeps the no-queue architecture rule (`Avoid queues` in master prompt engineering rules).
+- Avoids the fire-and-forget race we hit in tests.
+- Uses Postgres, which is already a hard dependency.
+- Falls naturally into M11 / M15 (Failure Surface) when the controller surface stabilizes.
+
+**Tradeoffs**
+
+- (+) Zero new infra dependencies.
+- (+) Lets the existing `POST /generations` endpoint become self-driving without a queue.
+- (-) Requires a transaction wrapper around `findMany` + status updates in `PipelineOrchestrator.runBatch`.
+- (-) Does not address the deeper issue that 60–90s AI calls block the request thread if invoked synchronously; the fire-and-forget pattern is still wanted, just made safe.
+
+**Workaround for now**: tests call `pipeline.runBatch(batchId)` explicitly. Real users cannot complete a generation through the UI.
+
 ---
 
 ## References
