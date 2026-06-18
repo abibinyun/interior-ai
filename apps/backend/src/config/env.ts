@@ -22,7 +22,7 @@ const envSchema = z.object({
   GENERATION_HARD_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
 
   STORAGE_PROVIDER: z.enum(['supabase']).default('supabase'),
-  SUPABASE_URL: z.string().url().optional(),
+  SUPABASE_URL: z.string().url().optional().or(z.literal('')).transform((v) => v || undefined),
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().default(''),
   SUPABASE_STORAGE_BUCKET: z.string().min(1),
   SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),

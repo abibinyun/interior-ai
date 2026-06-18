@@ -50,19 +50,19 @@ services:
       LOG_LEVEL: debug
       DATABASE_URL: postgresql://interior:interior@postgres:5432/interior?schema=public
       SESSION_COOKIE_NAME: sid
-      SESSION_COOKIE_SECRET: dev-only-secret-please-change-in-production-32chars
+      SESSION_COOKIE_SECRET: change-me-in-prod-min-32-chars-ok
       CORS_ORIGINS: http://localhost:5173
       AI_PROVIDER: ${AI_PROVIDER:-pollinations}
-      AI_PRIMARY_BASE_URL: ${AI_PRIMARY_BASE_URL:-https://image.pollinations.ai}
+      AI_PRIMARY_BASE_URL: ${AI_PRIMARY_BASE_URL:-https://gen.pollinations.ai}
       AI_FALLBACK_BASE_URL: ${AI_FALLBACK_BASE_URL:-https://api.myceli.ai}
       AI_PRIMARY_API_KEY: ${AI_PRIMARY_API_KEY:-}
       AI_FALLBACK_API_KEY: ${AI_FALLBACK_API_KEY:-}
       GENERATION_TIMEOUT_MS: 60000
       GENERATION_HARD_TIMEOUT_MS: 90000
       STORAGE_PROVIDER: supabase
-      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_URL: ${SUPABASE_URL:-https://ouuvllkqdjqwnottssod.supabase.co}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
-      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-interior-dev}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-generations}
       SIGNED_URL_TTL_SECONDS: 900
       RATE_LIMIT_PER_SESSION_PER_MIN: 10
     ports:
