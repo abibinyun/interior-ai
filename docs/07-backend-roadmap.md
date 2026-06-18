@@ -333,7 +333,7 @@ Branching / parallel work is permitted **only** for independent adapter spikes (
 
 ---
 
-### M13 — References
+### M13 — References ✅ Completed 2026-06-18
 
 **Objective**: Reference management for all three source types.
 

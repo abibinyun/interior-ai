@@ -9,6 +9,7 @@ import { loadEnv } from './config';
 import { GenerationsModule } from './generations/generations.module';
 import { PrismaModule } from './prisma';
 import { ProjectsModule } from './projects/projects.module';
+import { ReferencesModule } from './references/references.module';
 import { RoomsModule } from './rooms/rooms.module';
 import { SessionsModule } from './sessions';
 import { StylesModule } from './styles/styles.module';
@@ -50,6 +51,7 @@ import { StylesModule } from './styles/styles.module';
     }),
     PrismaModule,
     SessionsModule,
+    ReferencesModule,
     HealthModule,
     ProjectsModule,
     RoomsModule,

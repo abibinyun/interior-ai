@@ -370,6 +370,52 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-18 — M13 References
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/references/` (module/controller/service/repository/DTO), `apps/backend/test/references.e2e-spec.ts`, plus minor edits to `storage.adapter.ts` (MIME whitelist + size cap constants) and `app.module.ts` (registration).
+
+- Verification (all green before commit):
+  - `npm run typecheck` → 0 errors
+  - `npm run lint` → 0 errors
+  - `npm run build:backend` → 0 errors
+  - `npm run test` → **156/156 pass** (143 prior + 13 new M13 tests, +1 from the new storage constants path)
+  - `docker compose up` → all healthy
+  - End-to-end smoke: `POST /api/rooms/{id}/references` (GENERATED) returns the reference; `POST /api/rooms/{id}/references/upload` (UPLOADED) returns a serialized reference with a short-TTL signed URL.
+
+- M13 deliverables:
+  - **`ReferencesModule`** wired into `AppModule`; controller exposes 3 endpoints under `/api/rooms/:roomId/references` (list, add) and `/api/rooms/:roomId/references/upload` (multipart), plus `DELETE /api/references/:id`.
+  - **`AddReferenceDto`** (class-validator): `sourceType` enum (GENERATED | EXTERNAL_URL | UPLOADED) + conditional `sourceId` / `externalUrl` + optional `caption` (max 500 chars). UPLOADED is rejected at the DTO layer with 400 VALIDATION_FAILED and at the service with 409 CONFLICT (the service-level check is the source of truth).
+  - **`ReferencesService.addReference`** enforces:
+    - GENERATED → `sourceId` is required and the target Generation must belong to the same room AND the same session (`gen.sessionId === this.sessionContext.sessionId`). Cross-room or cross-session returns 404.
+    - EXTERNAL_URL → `externalUrl` is required, parses via `URL` constructor, and `class-validator`'s `@IsUrl({ require_tld: false })` accepts localhost / IPs.
+  - **`ReferencesService.uploadReference`** enforces (MIME/size order from rule SG-06):
+    1. Room ownership (404 if not found / wrong session).
+    2. MIME whitelist (`image/jpeg | image/png | image/webp`) → 400 UPLOAD_REJECTED with `fields.mimeType` on failure.
+    3. Size cap `MAX_UPLOAD_BYTES = 10 MB` → 400 UPLOAD_REJECTED with `fields.size` on failure.
+    4. Storage upload (`StorageAdapter.upload`) → 400 UPLOAD_REJECTED on failure (storage code mapped to `fields.reason`).
+    5. DB row creation **only after** the storage object exists, satisfying the `references_source_consistency_chk` / `references_uploaded_consistency_chk` / `references_mime_type_chk` CHECK constraints.
+  - **Multipart controller** uses `@nestjs/platform-express` `FileInterceptor` with a 50 MB hard limit (above the service-level 10 MB cap, so the service's domain check is the one that fires with a typed error envelope — multer's own error path doesn't escape the AllExceptionsFilter).
+  - **DELETE** is session-isolated (re-checks `room.sessionId` before deleting) and best-effort deletes the storage object before the row.
+
+- 13 e2e tests cover:
+  - GENERATED: happy path, missing `sourceId` (400 VALIDATION_FAILED), wrong-room generation (404), wrong-session generation (404), add `UPLOADED` via JSON (409 CONFLICT, must use upload endpoint).
+  - EXTERNAL_URL: happy path, missing `externalUrl` (400), malformed URL (400).
+  - UPLOADED (multipart): happy path with signed URL, 12 MB → 400 UPLOAD_REJECTED (no partial state: no row, no storage call), bad MIME → 400 UPLOAD_REJECTED, storage failure → 400 UPLOAD_REJECTED + no row, then a second upload after resetting failure mode succeeds (proves no half-state).
+  - List + delete: list returns all references, delete removes both row and storage object, cross-session delete is hidden behind 404.
+
+- Bugs found and fixed during M13 verification (lessons recorded):
+  - `references_uploaded_consistency_chk` rejects byte_size > 10 MB at the DB level, but the test's check at `uploads.length === 0` (DoD) requires the service to reject *before* any storage call. Fix: kept the service-level `MAX_UPLOAD_BYTES` check at the top of `uploadReference` (after the MIME check). The DB CHECK is a defense-in-depth backstop.
+  - The shared `fakeStorageProxy.uploads` array accumulated across tests, so `uploads.length === 0` (a "no partial state" assertion) was order-dependent. Fix: added `beforeEach` that clears `uploads` and resets `failureMode` so each test's assertions are deterministic.
+  - Initial use of `ConflictError` (409) for missing `sourceId` / malformed `externalUrl` was technically wrong — these are client-input errors, not state conflicts. Switched to `ValidationError` (400) to match the API contract's intent and the test expectations.
+  - `STORAGE_ADAPTER` token uses `useExisting: SupabaseStorageAdapter`, so overriding the token in the test module doesn't replace the concrete instance. Fix: `overrideProvider(SupabaseStorageAdapter).useValue(fakeStorageProxy)` — same effect, correct binding.
+
+- Known limitations:
+  - No rollback of the storage object if `repo.create` (DB CHECK violation) fails after a successful upload. In practice the only realistic trigger is a CHECK constraint mismatch, which is itself a code bug; the in-service validation already covers the documented cases. A future hardening milestone can add a compensation delete.
+
+---
+
 ## 6. References
 
 - Product vision: `00-product-vision.md`
