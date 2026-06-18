@@ -54,6 +54,10 @@ class FakeStorageAdapter implements StorageAdapter {
     void key;
   }
 
+  async download(key: string): Promise<Buffer> {
+    return Buffer.from(`fake-download:${key}`);
+  }
+
   setFailCount(n: number): void { this.failCount = n; }
 }
 

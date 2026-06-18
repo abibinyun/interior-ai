@@ -416,6 +416,82 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-18 — M14 Export Bundle
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/exports/` (module/controller/service/repository/assembler/zip-writer/types), `apps/backend/src/storage/storage.adapter.ts` (new `download` method on the interface, `buildExportKey` helper), `apps/backend/src/storage/supabase-storage.adapter.ts` (download impl), `apps/backend/src/app.module.ts` (registration), `apps/backend/test/exports.e2e-spec.ts`, ADR-015 (ZIP library choice), test fakes updated.
+
+- Verification (all green before commit):
+  - `npm run typecheck` → 0 errors
+  - `npm run lint` → 0 errors
+  - `npm run build:backend` → 0 errors
+  - `npm run test` → **164/164 pass** (156 prior + 8 new M14 tests)
+  - `docker compose up` → all healthy
+  - End-to-end smoke: `POST /api/projects/{id}/exports` returns 201 with `{id, version, byteSize, manifest}`; the ZIP is uploaded to `${env}/exports/projects/{id}/v1.zip`; `GET /api/exports/{id}` returns the manifest + signed download URL with 15-minute TTL; re-exporting produces `v2.zip`.
+
+- M14 deliverables:
+  - **`ExportsModule`** wired into `AppModule`; controller exposes 3 endpoints (`POST /api/projects/:projectId/exports`, `GET /api/projects/:projectId/exports`, `GET /api/exports/:bundleId`).
+  - **`ExportsService.create`** flow:
+    1. Verify project exists, is owned by the current session, and `status === COMPLETED` (rule E-01). Anything else returns 400 VALIDATION_FAILED with `fields.status`.
+    2. Pull the full project + rooms + style + each room's brief, approved generation, and references.
+    3. For each room with an approved generation: download the storage object (via the new `StorageAdapter.download` method) so the approved image can be inlined into the bundle.
+    4. For each UPLOADED reference: download the storage object so the binary is inlined.
+    5. Hand everything to the pure `assembleBundle` function which produces the manifest + file list.
+    6. Build the ZIP with `buildZip` (jszip, ADR-015).
+    7. Compute next version = `MAX(version) + 1` from the DB, upload the ZIP, and insert the `ExportBundle` row. On UNIQUE constraint violation (`P2002` — concurrent writer), delete the orphan ZIP and retry up to 5 times.
+  - **`ExportsService.getById`** returns the manifest (jsonb) and a signed download URL with a configurable TTL (default 15 min, env `EXPORT_DOWNLOAD_TTL_SECONDS`).
+  - **`ExportsService.listByProjectId`** returns versions newest-first, with a per-project session-isolation check.
+
+- **Manifest schema** (the `payload` jsonb, also persisted for E-04 reproducibility):
+  ```json
+  {
+    "schemaVersion": 1,
+    "generatedAt": "<ISO>",
+    "project": { "id", "name", "description", "status", "createdAt", "completedAt" },
+    "styleProfile": { "styleKey", "styleNotes" } | null,
+    "rooms": [
+      { "id", "roomType", "status", "approvedGenerationId", "approvedImageFile", "promptFile", "notesFile", "referencesCount" }
+    ],
+    "files": [{ "path", "byteSize" }]
+  }
+  ```
+
+- **ZIP contents** (per ADR-010):
+  ```
+  project-summary.json
+  style-profile.json                      (only if a style profile exists)
+  approved-images/<room-slug>.<ext>       (only for APPROVED rooms; bytes copied from storage)
+  prompts/<room-slug>.json                (approved generation + lineage)
+  room-notes/<room-slug>.md               (always; brief rendered as markdown)
+  references/<id>.json                    (one per reference)
+  references/<id>.<ext>                   (only for UPLOADED references; bytes copied from storage)
+  ```
+
+- 8 e2e tests cover:
+  - **E-01**: non-COMPLETED project returns 400 VALIDATION_FAILED (the status guard runs before any storage call).
+  - **Session isolation**: 401 when no session cookie, 404 when a different session tries to GET an existing bundle.
+  - **DoD (happy path)**: a 2-room, styled, COMPLETED project produces a ZIP that unzips via `jszip.loadAsync` to include the documented file set; `approved-images/living-room.png` is byte-exact; `room-notes/living-room.md` references the room id and brief content; `style-profile.json` carries the chosen style key.
+  - **E-02 (append-only)**: re-exporting the same project produces v+1; list returns versions newest-first; both ZIPs are stored at distinct keys.
+  - **E-06 (signed URL)**: `GET /api/exports/:id` returns a `downloadUrl` + `downloadUrlExpiresAt` with a 15-minute window.
+  - **UPLOADED ref bin inlined**: an uploaded reference's bytes appear in the ZIP under `references/<id>.<ext>`, byte-exact.
+  - **Real-ZIP round-trip**: re-parsing the produced bytes via the real `jszip` library succeeds and surfaces the documented floor files.
+
+- Bugs found and fixed during M14 verification (lessons recorded):
+  - **Controller route prefix doubled the global prefix**: my first cut had `@Post('api/projects/:projectId/exports')` while the app uses `app.setGlobalPrefix('api')`, so the actual route became `api/api/...` and every request 404'd. Fix: drop the `api/` prefix in the controller — the global prefix is added once.
+  - **`ProjectsRepository` not exported from `ProjectsModule`**: the module's `providers` had it, but the `exports` array omitted it. ExportsModule's import of `ProjectsModule` therefore couldn't resolve the dependency. Fix: `exports: [ProjectsRepository]`.
+  - **Test env prefix**: the test setup forces `NODE_ENV=test`, so the storage key is `${test}/exports/...`, not `${development}/...`. The first cut of the test expected `development/...` and the assertion failed. Fix: the test asserts `test/...` (matching the real env).
+  - **Invalid `RoomType` enum values in test fixtures**: the enum is `MASTER_BEDROOM` and `WORKSPACE`; the test originally used `BEDROOM`, `OFFICE`, `STUDY`. Prisma rejected them with `Invalid value` errors. Fix: align fixtures with the enum.
+
+- ADR-015: chose `jszip` for the ZIP writer. See `10-decisions.md` ADR-015 for the full rationale (pure JS, mature, per-file STORE/DEFLATE for binary-vs-text reproducibility).
+
+- Known limitations:
+  - In-memory ZIP — fine for v1 bundle sizes; future large bundles (video refs) will need a streaming library.
+  - Version retry is bounded at 5 attempts; a pathological hot-loop would surface a 500. Real concurrency in v1 is one user/session, so this is theoretical.
+  - Compensation: if the DB insert fails for a non-`P2002` reason, the service attempts to delete the uploaded ZIP. A truly catastrophic double-failure (DB down + storage down) would leave an orphan object — surfaced via logs, not cleaned up automatically. M18 (production parity) can add a janitor task.
+
+---
+
 ## 6. References
 
 - Product vision: `00-product-vision.md`

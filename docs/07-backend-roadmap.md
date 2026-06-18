@@ -357,7 +357,7 @@ Branching / parallel work is permitted **only** for independent adapter spikes (
 
 ---
 
-### M14 — Export Bundle
+### M14 — Export Bundle ✅ Completed 2026-06-18
 
 **Objective**: Assemble, store, and version ZIP export bundles.
 

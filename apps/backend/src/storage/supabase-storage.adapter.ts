@@ -82,6 +82,43 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     return { key: request.key, publicUrl };
   }
 
+  async download(key: string): Promise<Buffer> {
+    if (!this.supabaseUrl) {
+      throw this.makeError('STORAGE_FAILED', 'SUPABASE_URL is not configured', key, undefined);
+    }
+    const url = `${this.supabaseUrl}/storage/v1/object/${this.bucket}/${key}`;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.serviceKey}`,
+    };
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    let response: Awaited<ReturnType<HttpFetcher['fetch']>>;
+    try {
+      response = await this.http.fetch(url, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+        timeoutMs: 30000,
+      });
+    } catch (err) {
+      clearTimeout(timeout);
+      this.logger.error({ err, key }, 'Supabase download network error');
+      throw this.makeError('STORAGE_FAILED', 'Supabase download network error', key, undefined);
+    }
+    clearTimeout(timeout);
+
+    if (response.status === 404) {
+      throw this.makeError('STORAGE_FAILED', `Object not found: ${key}`, key, 404);
+    }
+    if (response.status >= 400) {
+      throw this.makeError('STORAGE_FAILED', `Supabase download returned ${response.status}`, key, response.status);
+    }
+
+    return await response.body();
+  }
+
   async signedUrl(key: string, ttlSeconds: number): Promise<SignedUrlResult> {
     if (!this.supabaseUrl) {
       throw this.makeError('STORAGE_FAILED', 'SUPABASE_URL is not configured', key, undefined);

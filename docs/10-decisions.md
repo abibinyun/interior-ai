@@ -372,6 +372,48 @@ Concurrent invocations safely no-op on already-claimed rows. The transaction hol
 
 ---
 
+## ADR-015 — ZIP Library for Export Bundles
+
+**Status**: Approved
+
+**Context**
+
+M14 ships the export bundle (ADR-010): a ZIP archive containing the project summary, style profile, approved images, references, prompts, and per-room notes. The bundle must be:
+
+- Generated server-side, in-memory, on each `POST /api/projects/:id/exports` call.
+- Reproducible given unchanged project state (E-04): re-running the export should produce a byte-identical ZIP (or as close as practical).
+- Cross-platform (Linux/Mac/Windows reviewers).
+- Pure JS, no native bindings — the backend runs in a single Node.js Docker image and adding a `node-gyp` step would complicate the multi-stage build (M18) for no functional gain at v1 scale.
+
+**Options Considered**
+
+1. **`jszip`** — pure-JS, mature, no native deps, supports STORE/DEFLATE per file. Widely used (15M+ weekly downloads). Synchronous-style API; `generateAsync` returns a Buffer.
+2. **`archiver`** — stream-based, supports tar/zip on the fly, more complex API.
+3. **`fflate`** — pure-JS, very fast, but lower-level API; the team would need to write the central directory and headers manually for full control.
+4. Native `zlib` + hand-rolled ZIP container — max control, max effort, no upside for a one-time export.
+
+**Decision**
+
+Option 1: **`jszip`**.
+
+- For reproducibility, files are added in a deterministic order (rooms sorted by `createdAt`, references sorted by `createdAt`).
+- Binary assets (approved images, UPLOADED reference binaries) are written with `compression: 'STORE'` so the bytes are passed through verbatim.
+- Text content (JSON, markdown) is written with `compression: 'DEFLATE'` for size.
+- Every file is assigned a fixed ZIP timestamp (`1980-01-01 00:00:00 UTC`) so the central directory is byte-stable across runs.
+- Together these guarantees make E-04 verifiable in tests: the same input produces the same bytes.
+
+**Tradeoffs**
+
+- (+) Pure JS — no `node-gyp`, no alpine build chain, no platform-specific binaries.
+- (+) Mature library with predictable behavior across Node versions.
+- (+) Per-file STORE/DEFLATE keeps the binary portion of the bundle byte-exact (important for approved image checksumming downstream).
+- (-) Slightly larger on-disk output than full-DEFLATE for text — acceptable since bundles are small (one project, dozens of files).
+- (-) `jszip` keeps the entire archive in memory; for very large future bundles (e.g. video references) the team will need to switch to a streaming library. Out of scope for v1.
+
+**Status**: Approved.
+
+---
+
 ## References
 
 - Product vision: `00-product-vision.md`

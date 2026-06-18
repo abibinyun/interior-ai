@@ -16,5 +16,6 @@ import { ProjectsService } from './projects.service';
     StyleProfilesRepository,
     StyleProfilesService,
   ],
+  exports: [ProjectsRepository],
 })
 export class ProjectsModule {}

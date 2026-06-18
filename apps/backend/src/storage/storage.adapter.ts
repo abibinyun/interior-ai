@@ -57,6 +57,15 @@ export function buildReferenceKey(
   return `${env}/projects/${projectId}/rooms/${roomId}/references/${referenceId}/${safe}`;
 }
 
+/**
+ * Storage key for an export bundle ZIP. Per rule E-05 the key is fixed
+ * at `exports/projects/{projectId}/v{version}.zip` and is append-only
+ * (versions monotonically increase; existing keys are never overwritten).
+ */
+export function buildExportKey(env: string, projectId: string, version: number): string {
+  return `${env}/exports/projects/${projectId}/v${version}.zip`;
+}
+
 function mimeToExt(mime: string): string {
   if (mime === 'image/jpeg') return 'jpg';
   if (mime === 'image/png') return 'png';
@@ -67,6 +76,12 @@ function mimeToExt(mime: string): string {
 export interface StorageAdapter {
   readonly name: string;
   upload(request: UploadRequest): Promise<UploadResult>;
+  /**
+   * Download an object as a Buffer. Used by the export bundle assembler
+   * (M14) to inline approved image binaries and UPLOADED reference assets
+   * into the ZIP. Throws StorageError on failure (including 404).
+   */
+  download(key: string): Promise<Buffer>;
   signedUrl(key: string, ttlSeconds: number): Promise<SignedUrlResult>;
   delete(key: string): Promise<void>;
 }
