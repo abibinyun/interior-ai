@@ -1,0 +1,221 @@
+// AI Interior Design Journey Builder — Prisma schema
+// Source of truth: docs/06-database-design.md
+// Engine: PostgreSQL 16
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto]
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum ProjectStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+
+  @@map("project_status")
+}
+
+enum RoomStatus {
+  BRIEF_DRAFT
+  GENERATING
+  IN_REVIEW
+  APPROVED
+
+  @@map("room_status")
+}
+
+enum GenerationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+
+  @@map("generation_status")
+}
+
+enum RoomType {
+  LIVING_ROOM
+  DINING_ROOM
+  KITCHEN
+  MASTER_BEDROOM
+  BATHROOM
+  WORKSPACE
+
+  @@map("room_type")
+}
+
+enum ReferenceSourceType {
+  GENERATED
+  UPLOADED
+  EXTERNAL_URL
+
+  @@map("reference_source_type")
+}
+
+// ============================================================================
+// ENTITIES
+// ============================================================================
+
+model Session {
+  id          String   @id
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+
+  projects    Project[]
+
+  @@map("sessions")
+}
+
+model Project {
+  id          String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId   String         @map("session_id")
+  name        String
+  description String?
+  status      ProjectStatus  @default(DRAFT)
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  completedAt DateTime?      @map("completed_at") @db.Timestamptz(6)
+
+  session           Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  styleProfile      StyleProfile?
+  rooms             Room[]
+  exportBundles     ExportBundle[]
+
+  @@unique([sessionId, name])
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@map("projects")
+}
+
+model StyleProfile {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId             String   @unique @map("project_id") @db.Uuid
+  styleKey              String   @map("style_key")
+  styleNotes            String?  @map("style_notes")
+  colorTendenciesJson   Json?    @map("color_tendencies_json")
+  materialPrefsJson     Json?    @map("material_prefs_json")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("style_profiles")
+}
+
+model Room {
+  id                   String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId            String         @map("project_id") @db.Uuid
+  // Defensive denormalization (ADR-005) — populated by trigger, NOT by app code.
+  sessionId            String?        @map("session_id")
+  roomType             RoomType       @map("room_type")
+  status               RoomStatus     @default(BRIEF_DRAFT)
+  approvedGenerationId String?        @map("approved_generation_id") @db.Uuid
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project              Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  designBrief          DesignBrief?
+  generations          Generation[]
+  references           Reference[]
+
+  @@unique([projectId, roomType])
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@map("rooms")
+}
+
+model DesignBrief {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId               String   @unique @map("room_id") @db.Uuid
+  purpose              String?
+  occupants            String?
+  lightingPreferences  String?  @map("lighting_preferences")
+  furnitureRequirements String? @map("furniture_requirements")
+  constraints          String?
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("design_briefs")
+}
+
+model Generation {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId             String           @map("room_id") @db.Uuid
+  // Defensive denormalization (ADR-005) — populated by trigger.
+  sessionId          String?          @map("session_id")
+  batchId            String           @map("batch_id") @db.Uuid
+  optionIndex        Int              @map("option_index") @db.SmallInt
+  parentGenerationId String?          @map("parent_generation_id") @db.Uuid
+  prompt             String
+  negativePrompt     String?          @map("negative_prompt")
+  imageUrl           String?          @map("image_url")
+  storageObjectKey   String?          @map("storage_object_key")
+  status             GenerationStatus @default(PENDING)
+  errorCode          String?          @map("error_code")
+  errorMessage       String?          @map("error_message")
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  room         Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  parent       Generation? @relation("GenerationLineage", fields: [parentGenerationId], references: [id], onDelete: SetNull)
+  descendants  Generation[] @relation("GenerationLineage")
+  referencedBy Reference[] @relation("GenerationReferences")
+
+  @@index([roomId, createdAt(sort: Desc)])
+  @@index([batchId])
+  @@index([parentGenerationId])
+  @@index([status])
+  @@index([sessionId, createdAt(sort: Desc)])
+  @@map("generations")
+}
+
+model Reference {
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  roomId            String              @map("room_id") @db.Uuid
+  // Defensive denormalization (ADR-005) — populated by trigger.
+  sessionId         String?             @map("session_id")
+  sourceType        ReferenceSourceType @map("source_type")
+  sourceId          String?             @map("source_id") @db.Uuid
+  storageObjectKey  String?             @map("storage_object_key")
+  externalUrl       String?             @map("external_url")
+  mimeType          String?             @map("mime_type")
+  byteSize          BigInt?             @map("byte_size")
+  originalFilename  String?             @map("original_filename")
+  caption           String?
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  room       Room        @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  generation Generation? @relation("GenerationReferences", fields: [sourceId], references: [id], onDelete: SetNull)
+
+  @@index([roomId])
+  @@index([sessionId])
+  @@map("references")
+}
+
+model ExportBundle {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  // Defensive denormalization (ADR-005) — populated by trigger.
+  sessionId        String?  @map("session_id")
+  version          Int
+  storageObjectKey String   @map("storage_object_key")
+  byteSize         BigInt   @map("byte_size")
+  payload          Json
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, version])
+  @@index([projectId, createdAt(sort: Desc)])
+  @@map("export_bundles")
+}

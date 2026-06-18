@@ -20,6 +20,19 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile.dev
+    container_name: interior-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://interior:interior@postgres:5432/interior?schema=public
+    entrypoint: ["npx", "prisma", "migrate", "deploy", "--schema=prisma/schema.prisma"]
+    restart: "no"
+
   backend:
     build:
       context: .
@@ -29,6 +42,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
       PORT: 3000

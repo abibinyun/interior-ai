@@ -7,21 +7,27 @@ WORKDIR /repo
 COPY package.json package-lock.json* ./
 COPY apps/backend/package.json ./apps/backend/package.json
 COPY packages/shared/package.json ./packages/shared/package.json
-RUN npm install --workspaces --include-workspace-root
+COPY prisma ./prisma
+RUN npm install --workspaces --include-workspace-root \
+ && npx prisma generate --schema=prisma/schema.prisma
 
 # --- build ---
 FROM node:20-alpine AS build
 WORKDIR /repo
 COPY --from=deps /repo/node_modules ./node_modules
-COPY . .
-RUN npm run build:backend
+COPY apps/backend ./apps/backend
+COPY apps/backend/tsconfig.json ./tsconfig.json
+COPY apps/backend/tsconfig.build.json ./tsconfig.build.json
+RUN npx nest build -p apps/backend/tsconfig.build.json
 
 # --- runtime ---
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=build /repo/node_modules ./node_modules
+RUN apk add --no-cache openssl libc6-compat wget
+
+COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=build /repo/apps/backend/dist ./dist
 COPY --from=build /repo/apps/backend/package.json ./package.json
 

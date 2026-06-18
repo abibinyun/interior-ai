@@ -4,7 +4,9 @@
 process.env.NODE_ENV = 'test';
 process.env.PORT = '3001';
 process.env.LOG_LEVEL = 'info';
-process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
+process.env.DATABASE_URL =
+  process.env.DATABASE_URL ||
+  'postgresql://interior:interior@127.0.0.1:5432/interior?schema=public';
 process.env.SESSION_COOKIE_NAME = 'sid';
 process.env.SESSION_COOKIE_SECRET = 'a'.repeat(32);
 process.env.CORS_ORIGINS = 'http://localhost:5173';

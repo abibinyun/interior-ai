@@ -6,6 +6,8 @@ import { LoggerModule } from 'nestjs-pino';
 import { HealthModule } from './health';
 import { AllExceptionsFilter, RequestIdMiddleware } from './common';
 import { loadEnv } from './config';
+import { PrismaModule } from './prisma';
+import { SessionsModule } from './sessions';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { loadEnv } from './config';
         };
       },
     }),
+    PrismaModule,
+    SessionsModule,
     HealthModule,
   ],
   providers: [

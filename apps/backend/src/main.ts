@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { corsOriginsList, loadEnv } from './config';
 
@@ -9,6 +10,8 @@ async function bootstrap(): Promise<void> {
   const env = loadEnv();
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
+
+  app.use(cookieParser());
 
   app.enableCors({
     origin: corsOriginsList(env.CORS_ORIGINS),
