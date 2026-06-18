@@ -346,6 +346,30 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-18 — M12 Approval (DoD coverage)
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/test/approval.e2e-spec.ts`, approve/reopen service methods, `/approval` and `/reopen` endpoints.
+- Verification (all green before commit):
+  - `npm run typecheck` → 0 errors
+  - `npm run lint` → 0 errors
+  - `npm run build:backend` → 0 errors
+  - `npm run test` → **143/133 pass** (133 prior + 10 new M12 tests)
+  - `docker compose up` → all healthy
+  - End-to-end smoke: `POST /api/rooms/{id}/approval { generationId }` on a FAILED generation returns 409 with the standardized error envelope ✓
+
+- M12 deliverables (endpoints already existed from M11; this milestone adds explicit DoD coverage):
+  - `apps/backend/test/approval.e2e-spec.ts` — 10 e2e tests covering every M12 DoD bullet:
+    - **A-01 (rule)**: rejects FAILED, PENDING, non-existent, and wrong-room generations; accepts COMPLETED; transitions room to APPROVED.
+    - **A-02 (rule)**: re-approving a different COMPLETED generation replaces the room pointer (verified via DB read); previous generation row is immutable (rule G-04 — its `prompt`, `status`, and `image_url` are unchanged after the second approval).
+    - **A-03 / reopen**: reopen clears `approved_generation_id` and transitions to `IN_REVIEW`; reopen rejects non-APPROVED rooms with 409; reopening re-enables generation (POST `/generations` returns 201 after reopen, vs 409 before).
+
+- Bug found and fixed during M12 verification (lesson recorded):
+  - The M12 test helper assumed a fresh room per batch, but `createBatchWithStatuses` was being called after `approve`, which leaves the room APPROVED. The new batch creation hit the "Cannot generate on an APPROVED room" guard and the test failed with a confusing `items.map of undefined`. Fix: the helper now reopens the room if it is APPROVED before creating a new batch.
+
+---
+
 ## 6. References
 
 - Product vision: `00-product-vision.md`

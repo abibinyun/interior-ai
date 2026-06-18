@@ -316,7 +316,7 @@ Branching / parallel work is permitted **only** for independent adapter spikes (
 
 ---
 
-### M12 — Approval
+### M12 — Approval ✅ Completed 2026-06-18
 
 **Objective**: Room approval flow and consistency anchor recomputation.
 
