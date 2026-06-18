@@ -35,6 +35,25 @@ Each entry follows this template:
 
 ## 2. Reviews
 
+### 2026-06-18 — M10 Refinement & Lineage
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/generations/generations.repository.ts`, `generations.service.ts`, `generations-lineage.controller.ts`, `test/lineage.e2e-spec.ts`
+- Notes:
+  - `GET /api/generations/:id/lineage` returns `{ root, ancestors, descendants }`.
+  - `GenerationsRepository.findAncestors` and `findDescendants` use Postgres recursive CTEs (`WITH RECURSIVE`) — no N+1 queries.
+  - Ancestors ordered root→child, descendants ordered child→leaf.
+  - Response shape: `{ id, optionIndex, createdAt }` per node (no full Generation payload).
+  - Refinement endpoint (`parentGenerationId` + `refinements`) was already in M8; M10 added the lineage query to traverse it.
+  - 8 e2e tests: grandchild lineage (root + 2 ancestors), mid-level lineage (root + 1 ancestor + 3 descendants), root lineage (no ancestors, 6 descendants), 404 for unknown, 401 without session, refinement prompt includes refinements, all 3 children share parent, cross-session 404.
+  - **Known limitation**: refinement prompt composition appends refinement descriptors (per M10 scope). Semantic translation deferred.
+- Action items:
+  - M11 (Consistency Anchor) will inject approved-room prompts into new-room generation.
+  - M14 (Export Bundle) will include lineage per room.
+
+---
+
 ### 2026-06-18 — M9 Generation Pipeline
 
 - Reviewer: Project Owner (self)

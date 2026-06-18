@@ -116,6 +116,35 @@ export class GenerationsService {
     return this.serialize(gen);
   }
 
+  async getLineage(generationId: string): Promise<{
+    root: { id: string; optionIndex: number; createdAt: string };
+    ancestors: Array<{ id: string; optionIndex: number; createdAt: string }>;
+    descendants: Array<{ id: string; optionIndex: number; createdAt: string }>;
+  }> {
+    const gen = await this.repo.findById(generationId);
+    if (!gen) throw new NotFoundError('Generation not found.');
+
+    const [ancestors, descendants] = await Promise.all([
+      this.repo.findAncestors(generationId),
+      this.repo.findDescendants(generationId),
+    ]);
+
+    const summarize = (g: { id: string; optionIndex: number; createdAt: Date }) => ({
+      id: g.id,
+      optionIndex: g.optionIndex,
+      createdAt: g.createdAt.toISOString(),
+    });
+
+    const root = ancestors[ancestors.length - 1];
+    if (!root) throw new Error('Root generation missing from lineage query');
+
+    return {
+      root: summarize(root),
+      ancestors: ancestors.slice(0, -1).reverse().map(summarize),
+      descendants: descendants.slice(1).map(summarize),
+    };
+  }
+
   async markProcessing(id: string): Promise<void> {
     await this.repo.updateStatus(id, 'PROCESSING', {});
   }
