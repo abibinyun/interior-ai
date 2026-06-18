@@ -7,7 +7,9 @@ import { HealthModule } from './health';
 import { AllExceptionsFilter, RequestIdMiddleware } from './common';
 import { loadEnv } from './config';
 import { PrismaModule } from './prisma';
+import { ProjectsModule } from './projects/projects.module';
 import { SessionsModule } from './sessions';
+import { StylesModule } from './styles/styles.module';
 
 @Module({
   imports: [
@@ -47,6 +49,8 @@ import { SessionsModule } from './sessions';
     PrismaModule,
     SessionsModule,
     HealthModule,
+    ProjectsModule,
+    StylesModule,
   ],
   providers: [
     {

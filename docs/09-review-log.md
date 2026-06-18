@@ -35,6 +35,24 @@ Each entry follows this template:
 
 ## 2. Reviews
 
+### 2026-06-18 — M4 Project + Style
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/styles/`, `apps/backend/src/projects/`, `apps/backend/src/style-profiles/`, `apps/backend/test/projects.e2e-spec.ts`
+- Notes:
+  - `GET /api/styles` returns hardcoded catalog (8 styles) without session guard.
+  - `ProjectsController` exposes CRUD + lifecycle (`complete` / `reopen`) + style profile endpoints, all guarded by `SessionGuard`.
+  - DTOs enforce P-02 (name 1–80 chars, trimmed), P-03 (description ≤ 1000 chars), ST-02 (styleKey must be in catalog).
+  - Service enforces P-04 (unique name per session → 409), P-05 (reopen only from COMPLETED), and complete-requires-all-rooms-approved.
+  - Cross-session access returns 404 (hides existence per S-05).
+  - 20 e2e tests cover: catalog, CRUD, validation, duplicates, cross-session denial, lifecycle, style profile (ST-01..ST-03), cross-session style denial.
+  - `styleKey` validation is done in the service layer against the catalog, not via class-validator enum (catalog is data, not a TS enum).
+- Action items:
+  - M5 (Rooms + Briefs) will add `RoomsController` and `DesignBriefsController`.
+
+---
+
 ### 2026-06-18 — M3 Session
 
 - Reviewer: Project Owner (self)
