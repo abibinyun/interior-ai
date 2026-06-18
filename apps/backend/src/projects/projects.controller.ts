@@ -11,6 +11,8 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
+import { RoomsService } from '../rooms/rooms.service';
+import { CreateRoomDto } from '../rooms/dto/create-room.dto';
 import { SessionGuard } from '../sessions/session.guard';
 import { SetStyleProfileDto } from '../style-profiles/dto/set-style-profile.dto';
 import { StyleProfilesService } from '../style-profiles/style-profiles.service';
@@ -24,6 +26,7 @@ export class ProjectsController {
   constructor(
     private readonly service: ProjectsService,
     private readonly styles: StyleProfilesService,
+    private readonly rooms: RoomsService,
   ) {}
 
   @Get()
@@ -74,5 +77,21 @@ export class ProjectsController {
     @Body() dto: SetStyleProfileDto,
   ): Promise<unknown> {
     return this.styles.set(projectId, dto);
+  }
+
+  @Get(':projectId/rooms')
+  async listRooms(
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+  ): Promise<{ items: unknown[] }> {
+    return this.rooms.listByProject(projectId);
+  }
+
+  @Post(':projectId/rooms')
+  @HttpCode(HttpStatus.CREATED)
+  async createRoom(
+    @Param('projectId', new ParseUUIDPipe()) projectId: string,
+    @Body() dto: CreateRoomDto,
+  ): Promise<unknown> {
+    return this.rooms.create(projectId, dto);
   }
 }

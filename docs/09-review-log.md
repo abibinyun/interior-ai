@@ -35,6 +35,24 @@ Each entry follows this template:
 
 ## 2. Reviews
 
+### 2026-06-18 — M5 Rooms + Briefs
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/rooms/`, `apps/backend/test/rooms.e2e-spec.ts`, updates to `apps/backend/src/projects/projects.controller.ts` and `apps/backend/src/app.module.ts`
+- Notes:
+  - `RoomsController` exposes `GET /api/rooms/:roomId` and `PUT /api/rooms/:roomId/brief`.
+  - `ProjectsController` adds `GET /api/projects/:projectId/rooms` and `POST /api/projects/:projectId/rooms` (nested).
+  - DTOs enforce R-02 (roomType enum), B-01 (length caps: purpose 1000, occupants 500, lighting 500, furniture 1000, constraints 1000).
+  - Service enforces R-01 (belongs to one project), R-03 (unique roomType per project → 409), R-04 (1:1 brief, created empty), B-02 (editable before approval), B-03 (editing APPROVED brief → IN_REVIEW, clears `approvedGenerationId`).
+  - Cross-session access returns 404 (S-05).
+  - 14 e2e tests cover: CRUD, R-02/R-03, brief CRUD, B-01 length validation, B-03 transition, cross-session denial.
+  - Room creation blocked in COMPLETED projects.
+- Action items:
+  - M6 (AI Provider Adapter) will introduce generation pipeline triggered from rooms.
+
+---
+
 ### 2026-06-18 — M4 Project + Style
 
 - Reviewer: Project Owner (self)

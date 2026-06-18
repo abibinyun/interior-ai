@@ -8,6 +8,7 @@ import { AllExceptionsFilter, RequestIdMiddleware } from './common';
 import { loadEnv } from './config';
 import { PrismaModule } from './prisma';
 import { ProjectsModule } from './projects/projects.module';
+import { RoomsModule } from './rooms/rooms.module';
 import { SessionsModule } from './sessions';
 import { StylesModule } from './styles/styles.module';
 
@@ -50,6 +51,7 @@ import { StylesModule } from './styles/styles.module';
     SessionsModule,
     HealthModule,
     ProjectsModule,
+    RoomsModule,
     StylesModule,
   ],
   providers: [
