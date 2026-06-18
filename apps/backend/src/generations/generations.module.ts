@@ -1,14 +1,17 @@
 import { Module } from '@nestjs/common';
+import { AiModule } from '../ai/ai.module';
 import { PrismaModule } from '../prisma';
+import { StorageModule } from '../storage/storage.module';
 import { GenerationsController } from './generations.controller';
 import { GenerationsRepository } from './generations.repository';
 import { GenerationsService } from './generations.service';
+import { PipelineOrchestrator } from './pipeline-orchestrator';
 import { PromptComposer } from './prompt-composer';
 
 @Module({
-  imports: [PrismaModule],
+  imports: [PrismaModule, AiModule, StorageModule],
   controllers: [GenerationsController],
-  providers: [GenerationsRepository, GenerationsService, PromptComposer],
+  providers: [GenerationsRepository, GenerationsService, PromptComposer, PipelineOrchestrator],
   exports: [GenerationsService],
 })
 export class GenerationsModule {}

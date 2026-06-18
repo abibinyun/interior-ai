@@ -35,6 +35,27 @@ Each entry follows this template:
 
 ## 2. Reviews
 
+### 2026-06-18 — M9 Generation Pipeline
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/generations/pipeline-orchestrator.ts`, `apps/backend/test/pipeline.e2e-spec.ts`
+- Notes:
+  - `PipelineOrchestrator` runs the full pipeline: PENDING → PROCESSING → generate (AI) → upload (Storage) → COMPLETED.
+  - **AI-07 fallback**: on `PROVIDER_TIMEOUT` or `PROVIDER_BROKEN` from the active adapter, one attempt is made against the other adapter (Pollinations ↔ Myceli). `PROVIDER_REJECTED` does NOT trigger fallback.
+  - **G-10**: if all 3 generations fail, room stays in `GENERATING` (never silently discarded). If at least one completes, room → `IN_REVIEW`.
+  - **SG-03**: storage upload failure marks the generation `FAILED` with `STORAGE_FAILED`.
+  - Object keys: `${env}/projects/{p}/rooms/{r}/generations/{genId}.{ext}` (ADR-004).
+  - **G-08/G-09**: provider URLs are never persisted — only storage URLs.
+  - Controller does NOT auto-fire the pipeline (removed to avoid double-processing). Callers must explicitly invoke `PipelineOrchestrator.runBatch(batchId)`. This keeps the pipeline deterministic for tests and future async work.
+  - 6 e2e tests with mocked AI + Storage: happy path, AI-07 timeout fallback, AI-07 broken fallback, PROVIDER_REJECTED no-fallback, G-10 all-failed, SG-03 storage failure.
+  - **Not in M9 scope (deferred)**: 202 + polling endpoint for long-tail cases, refinement (M10), consistency anchor (M11).
+- Action items:
+  - M10 (Refinement) will use `parentGenerationId` lineage tracking.
+  - M11 (Consistency Anchor) will inject approved-room prompts into new-room generation.
+
+---
+
 ### 2026-06-18 — M8 Generations Core
 
 - Reviewer: Project Owner (self)

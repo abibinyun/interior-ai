@@ -29,6 +29,6 @@ import { PollinationsAdapter } from './adapters/pollinations.adapter';
       },
     },
   ],
-  exports: [AI_PROVIDER_ADAPTER],
+  exports: [AI_PROVIDER_ADAPTER, PollinationsAdapter, MyceliAdapter, HTTP_FETCHER],
 })
 export class AiModule {}

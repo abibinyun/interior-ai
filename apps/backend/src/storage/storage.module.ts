@@ -6,6 +6,7 @@ import { SupabaseStorageAdapter } from './supabase-storage.adapter';
 
 @Module({
   providers: [
+    FetchHttpFetcher,
     SupabaseStorageAdapter,
     {
       provide: HTTP_FETCHER,
