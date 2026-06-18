@@ -291,9 +291,13 @@ All v1 open questions are resolved. New questions raised during implementation w
   - End-to-end smoke: session → project → style → room → brief → generation batch (returns 201 with 3 PENDING rows)
 
 - Notes:
-  - **M8 gap closed**: added `GET /api/rooms/:roomId/generations/batches/:batchId` and `GenerationsService.listByBatchIdInRoom(...)` for polling batch status (was documented in M8 DoD but not implemented in the initial commit).
-  - **Idempotency added**: `PipelineOrchestrator.runBatch` now filters rows by `status = 'PENDING'`, so duplicate invocations are safe no-ops.
-  - **Vitest default testTimeout bumped** to 30s — the M9 happy-path test exercises a real 3-step async flow that occasionally exceeded the 5s default.
+  - **M8 gap closed**: added `GET /api/rooms/:roomId/generations/batches/:batchId` and
+    `GenerationsService.listByBatchIdInRoom(...)` so callers can poll
+    a batch's status transitions (PENDING -> PROCESSING -> COMPLETED|FAILED).
+  - **Idempotency added**: `PipelineOrchestrator.runBatch` filters rows by
+    `status = 'PENDING'`, so duplicate invocations are safe no-ops.
+  - **Vitest default testTimeout bumped** to 30s — the M9 happy-path test
+    exercises a real 3-step async flow that occasionally exceeded the 5s default.
 
 - **Known integration gap (M9)** — to be addressed before M11:
   `POST /api/rooms/:roomId/generations` creates the 3 Generation rows as PENDING and updates the room to GENERATING, but it does **not** auto-trigger `PipelineOrchestrator.runBatch`. The HTTP caller must currently invoke the pipeline through a separate mechanism (tests do this directly; production callers do not have such a path).
@@ -304,6 +308,41 @@ All v1 open questions are resolved. New questions raised during implementation w
     2. Introduce a job queue (BullMQ on Redis) and move `runBatch` to a worker, OR
     3. Add an explicit "process batch" admin endpoint and document that production deployments need a sidecar that polls pending batches.
   - **Workaround for now**: the e2e test suite drives `pipeline.runBatch(batchId)` directly after creating a batch. The unit tests for M6 (AI adapter) and M7 (storage) remain valid.
+
+---
+
+### 2026-06-18 — M11 Consistency Anchor + M9 auto-trigger remediation
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `AnchorBuilder` service, integration into `PromptComposer`, M9 auto-trigger via `SELECT ... FOR UPDATE SKIP LOCKED`, minimal M12 approval/reopen endpoints (needed by M11 DoD), regression tests.
+
+- Verification (all green before commit):
+  - `npm run typecheck` → 0 errors
+  - `npm run lint` → 0 errors
+  - `npm run build:backend` → 0 errors
+  - `npm run test` → **133/133 pass** (117 prior + 16 new: 11 anchor unit + 5 consistency-anchor e2e)
+  - `docker compose up` → all healthy
+  - End-to-end smoke: `POST /api/rooms/{id}/generations` now produces a prompt that contains `House-wide design language: style=JAPANDI` (M11 anchor + style segment injected by the server-side composer)
+
+- M11 deliverables:
+  - **`AnchorBuilder`** (`apps/backend/src/generations/anchor-builder.ts`): server-side computation of the consistency anchor per ADR-011 + rule CA-05. Formula: `style_key + truncated style_notes`, then each approved room's `prompt` (truncated), joined with ` | `. Drops oldest room segments when total exceeds `ANCHOR_MAX_CHARS=1200` and appends `(+N earlier rooms)` tail.
+  - **`PromptComposer`** integration: anchor is computed by `GenerationsService.startBatch` (server-side) and passed to the composer as a read-only `consistencyAnchor` field. Never accepted from the client (G-07).
+  - **11 unit tests** for `AnchorBuilder.compose` (pure) cover: null cases, style-only, room-only, combined, ordering, truncation, anchor-budget trimming with tail, missing-room-prompt fallback.
+  - **5 integration tests** cover: no anchor with no style/approvals; style+approved-room anchor flows into subsequent rooms; approved-room prompts included; recomputes when approvals change; reopen clears approval and recomputes anchor.
+
+- M9 auto-trigger remediation (ADR-014 → Approved):
+  - `PipelineOrchestrator.runBatch` now begins with `SELECT ... FOR UPDATE SKIP LOCKED` inside a transaction and atomically transitions claimed rows to `PROCESSING`. Concurrent invocations safely no-op on already-claimed rows.
+  - `GenerationsService.startBatch` calls `void this.pipeline.runBatch(batchId)` after creating rows (gated by `ENABLE_GENERATION_AUTO_TRIGGER` env flag, default `true`; tests set it to `false` to avoid races).
+  - End-to-end fix: a real user calling `POST /api/rooms/{id}/generations` now actually drives the pipeline and rows transition PENDING → PROCESSING → COMPLETED|FAILED.
+
+- Minimal M12 endpoints (added because M11 DoD requires approval changes to recompute the anchor):
+  - `POST /api/rooms/{roomId}/approval { generationId }` → sets approved_generation_id and APPROVED status. Rules A-01..A-03 enforced.
+  - `POST /api/rooms/{roomId}/reopen` → clears approval and sets IN_REVIEW. Uses a separate `requireRoom` helper (not `requireOwnedRoom`) so the APPROVED-status check does not falsely trigger the startBatch "Cannot generate on an APPROVED room" path.
+  - Full M12 scope (re-approval policies, etc.) remains for a later milestone.
+
+- Bug found and fixed during verification (lesson recorded):
+  - `requireOwnedRoom` threw "Cannot generate on an APPROVED room" for any APPROVED room. `reopenRoom` called it and got the wrong error message when the room was APPROVED. Fixed by extracting a `requireRoom` helper that does not enforce the APPROVED-status guard, leaving that check to the caller.
 
 ---
 

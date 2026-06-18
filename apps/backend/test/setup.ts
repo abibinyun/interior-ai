@@ -23,3 +23,6 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = '';
 process.env.SUPABASE_STORAGE_BUCKET = 'generations';
 process.env.SIGNED_URL_TTL_SECONDS = '900';
 process.env.RATE_LIMIT_PER_SESSION_PER_MIN = '10';
+// Disable the auto-trigger so tests can drive the pipeline manually
+// without racing the production fire-and-forget path.
+process.env.ENABLE_GENERATION_AUTO_TRIGGER = 'false';

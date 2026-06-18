@@ -22,14 +22,21 @@ interface GenerationRow {
 
 /**
  * Orchestrates a generation batch:
- *   1. For each PENDING row, call the active AI adapter.
- *   2. On transient error (PROVIDER_TIMEOUT, PROVIDER_BROKEN), one fallback
+ *   1. Claim rows for processing with SELECT ... FOR UPDATE SKIP LOCKED
+ *      (Postgres). This prevents two concurrent runBatch() invocations from
+ *      fighting over the same PENDING rows (ADR-014).
+ *   2. For each claimed row, call the active AI adapter.
+ *   3. On transient error (PROVIDER_TIMEOUT, PROVIDER_BROKEN), one fallback
  *      attempt against the other adapter (AI-07).
- *   3. On success, upload the image buffer to storage; on storage failure,
+ *   4. On success, upload the image buffer to storage; on storage failure,
  *      mark FAILED with STORAGE_FAILED (SG-03).
- *   4. On non-transient error (PROVIDER_REJECTED), no fallback; mark FAILED.
- *   5. Update room status: IN_REVIEW if at least one completed, GENERATING
+ *   5. On non-transient error (PROVIDER_REJECTED), no fallback; mark FAILED.
+ *   6. Update room status: IN_REVIEW if at least one completed, GENERATING
  *      kept if all failed (G-10 — never silently discarded).
+ *
+ * Idempotency: if a row is already in PROCESSING / COMPLETED / FAILED it is
+ * skipped, even without the row lock. This makes it safe for callers that
+ * cannot use the transaction (e.g. simple admin endpoints) to retry.
  */
 @Injectable()
 export class PipelineOrchestrator {
@@ -48,30 +55,50 @@ export class PipelineOrchestrator {
   }
 
   async runBatch(batchId: string): Promise<PipelineResult> {
-    // Idempotency: only act on rows still in PENDING. If the caller
-    // (e.g. tests, or a duplicate trigger) invokes this twice, the second
-    // call is a no-op.
-    const rows = await this.prisma.generation.findMany({
-      where: { batchId, status: 'PENDING' },
-      orderBy: { optionIndex: 'asc' },
+    // Step 1: Claim PENDING rows with row-level locks. SKIP LOCKED ensures
+    // concurrent runBatch invocations don't double-process; rows already
+    // claimed by a peer are simply skipped by this caller.
+    const claimed = await this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{
+        id: string;
+        room_id: string;
+        prompt: string;
+        negative_prompt: string | null;
+      }>>`
+        SELECT id, room_id, prompt, negative_prompt
+        FROM generations
+        WHERE "batch_id" = ${batchId}::uuid
+          AND status = 'PENDING'
+        FOR UPDATE SKIP LOCKED
+      `;
+      // Immediately flip the status to PROCESSING inside the same transaction
+      // so the lock + state transition are atomic.
+      if (rows.length > 0) {
+        await tx.generation.updateMany({
+          where: { id: { in: rows.map((r) => r.id) } },
+          data: { status: 'PROCESSING' },
+        });
+      }
+      return rows.map((r) => ({
+        id: r.id,
+        roomId: r.room_id,
+        prompt: r.prompt,
+        negativePrompt: r.negative_prompt,
+      }));
     });
-    if (rows.length === 0) {
+
+    if (claimed.length === 0) {
       return { batchId, completed: 0, failed: 0, allFailed: false };
     }
 
-    const roomId = rows[0]!.roomId;
+    const roomId = claimed[0]!.roomId;
     const projectId = await this.getProjectIdForRoom(roomId);
 
     let completed = 0;
     let failed = 0;
 
-    for (const row of rows) {
-      const ok = await this.runOne({
-        id: row.id,
-        roomId: row.roomId,
-        prompt: row.prompt,
-        negativePrompt: row.negativePrompt,
-      }, projectId);
+    for (const row of claimed) {
+      const ok = await this.runOne(row, projectId);
       if (ok) completed += 1;
       else failed += 1;
     }
@@ -92,8 +119,6 @@ export class PipelineOrchestrator {
       prompt: gen.prompt,
       ...(gen.negativePrompt ? { negativePrompt: gen.negativePrompt } : {}),
     };
-
-    await this.markStatus(gen.id, 'PROCESSING');
 
     let result: GenerationResult | null = null;
     let lastError: { code: string; message: string } | null = null;
@@ -142,10 +167,6 @@ export class PipelineOrchestrator {
       this.logger.error({ generationId: gen.id, err: e }, 'storage upload failed (SG-03)');
       return false;
     }
-  }
-
-  private async markStatus(id: string, status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'): Promise<void> {
-    await this.prisma.generation.update({ where: { id }, data: { status } });
   }
 
   private async markCompleted(id: string, imageUrl: string, storageObjectKey: string): Promise<void> {

@@ -28,6 +28,12 @@ const envSchema = z.object({
   SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
 
   RATE_LIMIT_PER_SESSION_PER_MIN: z.coerce.number().int().positive().default(10),
+  // Default true; tests can disable the auto-trigger to keep their prisma
+  // updates deterministic (see ADR-014 for why we expose this).
+  ENABLE_GENERATION_AUTO_TRIGGER: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof envSchema>;

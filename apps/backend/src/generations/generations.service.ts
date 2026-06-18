@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Generation, Room } from '@prisma/client';
 import {
   BusinessRuleViolationError,
@@ -7,8 +8,10 @@ import {
 } from '../common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SessionContext } from '../sessions/session.context';
+import { AnchorBuilder } from './anchor-builder';
 import { StartBatchDto } from './dto/start-batch.dto';
 import { GenerationsRepository } from './generations.repository';
+import { PipelineOrchestrator } from './pipeline-orchestrator';
 import { PromptComposer } from './prompt-composer';
 
 export interface BatchResult {
@@ -35,10 +38,15 @@ export interface SerializedGeneration {
 
 @Injectable()
 export class GenerationsService {
+  private readonly logger = new Logger(GenerationsService.name);
+
   constructor(
     @Inject(GenerationsRepository) private readonly repo: GenerationsRepository,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PromptComposer) private readonly composer: PromptComposer,
+    @Inject(PipelineOrchestrator) private readonly pipeline: PipelineOrchestrator,
+    @Inject(AnchorBuilder) private readonly anchorBuilder: AnchorBuilder,
+    @Inject(ConfigService) private readonly config: ConfigService,
     @Inject(SessionContext) private readonly sessionContext: SessionContext,
   ) {}
 
@@ -60,6 +68,9 @@ export class GenerationsService {
       where: { projectId: room.projectId },
     });
 
+    // CA-01..CA-05: server-computed consistency anchor (ADR-011).
+    const consistencyAnchor = await this.anchorBuilder.build(room.projectId);
+
     const composed = this.composer.compose({
       styleKey: styleProfile?.styleKey ?? null,
       styleNotes: styleProfile?.styleNotes ?? null,
@@ -73,6 +84,7 @@ export class GenerationsService {
       },
       briefOverride: dto.briefOverride,
       refinements: dto.refinements,
+      consistencyAnchor: consistencyAnchor ?? undefined,
     });
 
     const items = composed.variations.map((v) => ({
@@ -93,8 +105,27 @@ export class GenerationsService {
       data: { status: 'GENERATING' },
     });
 
+    // Fire-and-forget pipeline execution (ADR-014). Safe under concurrent
+    // callers because PipelineOrchestrator.runBatch uses SELECT ... FOR
+    // UPDATE SKIP LOCKED to claim rows atomically; a duplicate call will
+    // simply skip already-claimed rows and return early.
+    //
+    // Disabled in tests (ENABLE_GENERATION_AUTO_TRIGGER=false) so that
+    // e2e tests can manually drive the pipeline or override rows without
+    // racing the auto-trigger.
+    const autoTriggerEnabled = this.config.get<boolean>(
+      'ENABLE_GENERATION_AUTO_TRIGGER',
+      true,
+    );
+    const batchId = created[0]!.batchId;
+    if (autoTriggerEnabled) {
+      void this.pipeline.runBatch(batchId).catch((err: unknown) => {
+        this.logger.error({ batchId, err }, 'pipeline.runBatch failed unexpectedly');
+      });
+    }
+
     return {
-      batchId: created[0]!.batchId,
+      batchId,
       items: created.map(this.serialize),
     };
   }
@@ -168,6 +199,62 @@ export class GenerationsService {
 
   async markFailed(id: string, code: string, message: string): Promise<Generation> {
     return this.repo.updateStatus(id, 'FAILED', { errorCode: code, errorMessage: message });
+  }
+
+  /**
+   * M12 — Approve a generation. Sets the room's approved_generation_id and
+   * transitions its status to APPROVED. Rule A-01: only a COMPLETED
+   * generation may be approved. Rule A-02/A-03: status/approvedGenerationId
+   * invariant enforced by DB CHECK constraint rooms_approved_consistency_chk.
+   */
+  async approve(roomId: string, generationId: string): Promise<unknown> {
+    await this.requireRoom(roomId);
+    const gen = await this.prisma.generation.findUnique({
+      where: { id: generationId },
+      select: { id: true, roomId: true, status: true },
+    });
+    if (!gen || gen.roomId !== roomId) {
+      throw new NotFoundError('Generation not found in this room.');
+    }
+    if (gen.status !== 'COMPLETED') {
+      throw new ConflictError('Only a COMPLETED generation may be approved.');
+    }
+    return this.prisma.room.update({
+      where: { id: roomId },
+      data: { approvedGenerationId: generationId, status: 'APPROVED' },
+    });
+  }
+
+  /**
+   * M12 — Re-open an APPROVED room. Clears approved_generation_id and
+   * transitions status back to IN_REVIEW (rule A-03 re-derived).
+   * Generation rows are preserved (rule G-04 — immutable).
+   *
+   * Uses `requireRoom` (not `requireOwnedRoom`) so the APPROVED status
+   * check does NOT short-circuit re-opening. The error envelope is
+   * "Room is not APPROVED." to distinguish from "Cannot generate on an
+   * APPROVED room" (which is the startBatch path).
+   */
+  async reopenRoom(roomId: string): Promise<unknown> {
+    const room = await this.requireRoom(roomId);
+    if (room.status !== 'APPROVED') {
+      throw new ConflictError('Room is not APPROVED.');
+    }
+    return this.prisma.room.update({
+      where: { id: roomId },
+      data: { approvedGenerationId: null, status: 'IN_REVIEW' },
+    });
+  }
+
+  private async requireRoom(roomId: string): Promise<Room> {
+    const room = await this.prisma.room.findUnique({
+      where: { id: roomId },
+      select: { id: true, projectId: true, roomType: true, status: true, sessionId: true },
+    });
+    if (!room || room.sessionId !== this.sessionContext.sessionId) {
+      throw new NotFoundError('Room not found.');
+    }
+    return room as Room;
   }
 
   private async requireOwnedRoom(roomId: string): Promise<Room> {

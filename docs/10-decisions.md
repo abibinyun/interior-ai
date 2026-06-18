@@ -338,35 +338,37 @@ Generation endpoints are expensive (provider calls + storage upload). Without li
 
 ## ADR-014 — Generation Batch Trigger (deferred to M11)
 
-**Status**: Proposed (deferred)
+**Status**: **Approved** (implemented in M11)
 
 **Context**
 
-`POST /api/rooms/:roomId/generations` creates 3 PENDING Generation rows and updates the room to GENERATING, but does **not** auto-trigger `PipelineOrchestrator.runBatch`. As a result, real users see batches stuck in PENDING indefinitely. Tests drive `runBatch` directly so the bug is invisible in CI.
-
-**Options Considered**
-
-1. **Auto-trigger from `startBatch` as fire-and-forget** — caused test races and CHECK-constraint violations when `runBatch` was invoked concurrently from test and controller. Reverted.
-2. **Job queue (BullMQ on Redis)** — proper async; introduces Redis dependency (currently out of v1 stack).
-3. **`SELECT ... FOR UPDATE SKIP LOCKED`** — Postgres-native lock; makes `runBatch` safe under concurrent invocation without a queue.
-4. **Polling sidecar / cron** — explicit batch-processing worker process that scans PENDING batches; simple but adds an operational piece.
+`POST /api/rooms/:roomId/generations` creates 3 PENDING Generation rows and updates the room to GENERATING, but did **not** auto-trigger `PipelineOrchestrator.runBatch`. Real users saw batches stuck in PENDING indefinitely.
 
 **Decision**
 
-Defer. The most pragmatic in-scope fix is **Option 3** (transactional `SELECT ... FOR UPDATE SKIP LOCKED` inside `runBatch`), which:
-- Keeps the no-queue architecture rule (`Avoid queues` in master prompt engineering rules).
-- Avoids the fire-and-forget race we hit in tests.
-- Uses Postgres, which is already a hard dependency.
-- Falls naturally into M11 / M15 (Failure Surface) when the controller surface stabilizes.
+`PipelineOrchestrator.runBatch` now begins with `SELECT ... FOR UPDATE SKIP LOCKED` inside a transaction and atomically transitions claimed rows to `PROCESSING`. `GenerationsService.startBatch` calls `void this.pipeline.runBatch(batchId)` after creating rows, gated by an `ENABLE_GENERATION_AUTO_TRIGGER` env flag (default `true`; tests set it to `false` to avoid races).
 
-**Tradeoffs**
+**Implementation** (apps/backend/src/generations/pipeline-orchestrator.ts):
 
-- (+) Zero new infra dependencies.
-- (+) Lets the existing `POST /generations` endpoint become self-driving without a queue.
-- (-) Requires a transaction wrapper around `findMany` + status updates in `PipelineOrchestrator.runBatch`.
-- (-) Does not address the deeper issue that 60–90s AI calls block the request thread if invoked synchronously; the fire-and-forget pattern is still wanted, just made safe.
+```sql
+SELECT id, room_id, prompt, negative_prompt
+FROM generations
+WHERE batch_id = $1::uuid AND status = 'PENDING'
+FOR UPDATE SKIP LOCKED
+-- then immediately: UPDATE generations SET status='PROCESSING' WHERE id IN (...)
+```
 
-**Workaround for now**: tests call `pipeline.runBatch(batchId)` explicitly. Real users cannot complete a generation through the UI.
+Concurrent invocations safely no-op on already-claimed rows. The transaction holds the row locks for the entire claim + status-transition, so two callers cannot race to PROCESSING.
+
+**Tradeoffs (final)**
+
+- (+) Zero new infra dependencies (no queue, no Redis, no separate worker).
+- (+) Honest production semantics: a real user clicking "Generate" actually drives the pipeline through the HTTP path.
+- (+) The auto-trigger is fire-and-forget — the HTTP response returns immediately with the 3 PENDING rows; the caller polls for status.
+- (-) The fire-and-forget call is still subject to Node.js event-loop blockages during the 60–90s AI call. Mitigation: the orchestration is asynchronous and per-row so a single batch's slow generation doesn't block other requests.
+- (+) Tests can disable the auto-trigger via `ENABLE_GENERATION_AUTO_TRIGGER=false` and drive the pipeline explicitly.
+
+**Status**: Approved.
 
 ---
 

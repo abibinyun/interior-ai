@@ -20,7 +20,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     setupFiles: ['./test/setup.ts'],
-    include: ['src/**/*.spec.ts', 'test/**/*.spec.ts', 'test/**/*.e2e-spec.ts'],
+    include: ['src/**/*.spec.ts', 'test/**/*.spec.ts', 'test/**/*.unit-spec.ts', 'test/**/*.e2e-spec.ts'],
     testTimeout: 30_000,
     coverage: {
       provider: 'v8',

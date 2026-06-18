@@ -296,7 +296,7 @@ Branching / parallel work is permitted **only** for independent adapter spikes (
 
 ---
 
-### M11 — Consistency Anchor
+### M11 — Consistency Anchor ✅ Completed 2026-06-18
 
 **Objective**: Server-computed anchor injected into subsequent rooms' prompts.
 
