@@ -35,6 +35,29 @@ Each entry follows this template:
 
 ## 2. Reviews
 
+### 2026-06-18 — M7 Storage Adapter
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/storage/`
+- Notes:
+  - `StorageAdapter` interface with `upload`, `signedUrl`, `delete`.
+  - `SupabaseStorageAdapter` calls Supabase Storage REST API (`/storage/v1/object/...`).
+  - Reuses the AI module's `HTTP_FETCHER` (native `fetch` via `FetchHttpFetcher`).
+  - Object keys per ADR-004: `${env}/projects/{projectId}/rooms/{roomId}/generations/{generationId}.{ext}`.
+  - Reference keys per SG-04: `${env}/projects/{projectId}/rooms/{roomId}/references/{referenceId}/{filename}` with path-traversal sanitization (strips `..` and leading `.`).
+  - Enforces SG-06: `MAX_UPLOAD_BYTES = 10MB`, allowed MIME types `image/jpeg|png|webp`.
+  - Error mapping: 4xx → `UPLOAD_REJECTED`, 5xx/network → `STORAGE_FAILED` (per AI-06 family).
+  - Delete is idempotent (404 is success).
+  - Signed URL supports both absolute (`https://...`) and relative (`/storage/...`) responses.
+  - 18 unit tests (upload, signedUrl, delete, key builders, error mapping, missing config).
+  - No controller endpoint (per scope) — adapter is consumed by M8/M9/M13.
+- Action items:
+  - M8 (Generations Core) will use `upload` + `signedUrl` for AI-generated images.
+  - M13 (References) will use `upload` + `signedUrl` for user-uploaded references.
+
+---
+
 ### 2026-06-18 — M6 AI Provider Adapter
 
 - Reviewer: Project Owner (self)
