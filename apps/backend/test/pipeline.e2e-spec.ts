@@ -4,7 +4,7 @@ import { Test } from '@nestjs/testing';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
-import { AI_PROVIDER_ADAPTER, AiProviderAdapter, GenerationRequest, GenerationResult, ProviderError } from '../src/ai/adapters/ai-provider.adapter';
+import { AI_PROVIDER_ADAPTER, AiProviderAdapter, GenerationRequest, GenerationResult, ProviderError, ProviderHealth } from '../src/ai/adapters/ai-provider.adapter';
 import { MyceliAdapter } from '../src/ai/adapters/myceli.adapter';
 import { PollinationsAdapter } from '../src/ai/adapters/pollinations.adapter';
 import { STORAGE_ADAPTER, StorageAdapter, UploadRequest, UploadResult, SignedUrlResult } from '../src/storage/storage.adapter';
@@ -27,6 +27,10 @@ class FakeAiAdapter implements AiProviderAdapter {
     if (!item) throw new Error(`FakeAiAdapter(${this.name}): no response queued for call ${this.callCount}`);
     if (item instanceof Error) throw item;
     return item;
+  }
+
+  async healthcheck(): Promise<ProviderHealth> {
+    return { ok: true, latencyMs: 0, detail: 'fake' };
   }
 
   getCalls(): number { return this.callCount; }

@@ -1,9 +1,9 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
 import { Logger } from 'nestjs-pino';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { buildValidationPipe } from './common/validation.pipe';
 import { corsOriginsList, loadEnv } from './config';
 
 async function bootstrap(): Promise<void> {
@@ -21,14 +21,7 @@ async function bootstrap(): Promise<void> {
 
   app.setGlobalPrefix('api');
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
+  app.useGlobalPipes(buildValidationPipe());
 
   await app.listen(env.PORT, '0.0.0.0');
 

@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AiProviderAdapter, GenerationRequest, GenerationResult, ProviderError } from './ai-provider.adapter';
+import { AiProviderAdapter, GenerationRequest, GenerationResult, ProviderError, ProviderHealth } from './ai-provider.adapter';
 
 export interface HttpFetcher {
   fetch(url: string, init: { method: string; headers: Record<string, string>; body?: string; signal: AbortSignal; timeoutMs: number }): Promise<{
@@ -82,6 +82,38 @@ export class PollinationsAdapter implements AiProviderAdapter {
       contentType,
       provider: this.name,
     };
+  }
+
+  async healthcheck(): Promise<ProviderHealth> {
+    // GET the base URL with a short timeout. A 2xx/3xx/4xx all prove
+    // reachability; only network failure (timeout, DNS, refused)
+    // counts as `ok: false`.
+    const start = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    try {
+      const res = await this.http.fetch(this.baseUrl, {
+        method: 'GET',
+        headers: {},
+        signal: controller.signal,
+        timeoutMs: 2000,
+      });
+      const latencyMs = Date.now() - start;
+      clearTimeout(timeout);
+      return {
+        ok: true,
+        latencyMs,
+        detail: `status=${res.status}`,
+      };
+    } catch (err) {
+      clearTimeout(timeout);
+      const e = err as Error;
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        detail: e?.message ?? 'unreachable',
+      };
+    }
   }
 
   private buildUrl(request: GenerationRequest): string {

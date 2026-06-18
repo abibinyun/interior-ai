@@ -492,6 +492,52 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-19 — M15 Failure Surface
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/common/validation.pipe.ts`, `src/health/health.controller.ts`, `src/health/health.module.ts`, `src/main.ts` (custom pipe), `src/ai/adapters/ai-provider.adapter.ts` (new `healthcheck`), `src/ai/adapters/pollinations.adapter.ts` + `myceli.adapter.ts` (healthcheck impl), `test/helpers/test-app.helper.ts`, `test/failure-surface.e2e-spec.ts`, test fakes updated.
+
+- Verification (all green before commit):
+  - `npm run typecheck` → 0 errors
+  - `npm run lint` → 0 errors
+  - `npm run build:backend` → 0 errors
+  - `npm run test` → **177/177 pass** (164 prior + 13 new M15 tests)
+  - `docker compose up` → all healthy
+  - End-to-end smoke: `POST /api/projects {name: ''}` returns `{error:{code:'VALIDATION_FAILED', fields:{name:'...'}}}`; `GET /api/health/ready` returns 200 with `{db,storage,ai}` checks; forcing the AI healthcheck to fail flips the response to 503 with `status:'down'`.
+
+- M15 deliverables:
+  - **`buildValidationPipe`** (`src/common/validation.pipe.ts`) replaces the default `ValidationPipe`. A custom `exceptionFactory` flattens class-validator errors into `{ path: firstConstraintMessage }` and throws `BadRequestException` with `{ message, fields }`. The existing `AllExceptionsFilter` then maps that 400 → `VALIDATION_FAILED` with the `fields` envelope, so the frontend can render per-field UI errors.
+  - **`test/helpers/test-app.helper.ts`** — `buildTestApp([AppModule])` is the canonical way to boot a NestJS test app from this milestone forward: it installs `cookie-parser`, the `api` global prefix, and the standardized `ValidationPipe`. Tests written against the legacy `moduleRef.createNestApplication()` pattern skip the pipe and mask DTO bugs; the new helper forces parity with `main.ts`.
+  - **`/api/health/live`** — unchanged: `{ status: 'ok' }` when the process is up.
+  - **`/api/health/ready`** — NEW. Runs three checks in parallel:
+    - `db`: `prisma.$queryRaw\`SELECT 1\`` (latency in ms).
+    - `storage`: validates that `SUPABASE_URL` is configured and reports the active adapter name. We deliberately do NOT make a real network call here: the readiness probe runs every few seconds and we don't want it to spam Supabase.
+    - `ai`: invokes the active provider's `healthcheck()`, a short-timeout GET against the provider's base URL.
+    Response shape: `{ status: 'ok'|'down', checks: { db, storage, ai } }`. Returns **503** when any check is `down` so a reverse proxy / orchestrator can drain the instance.
+  - **`AiProviderAdapter.healthcheck()`** added to the interface (ADR-002-consistent: providers remain behind the same facade). Both `PollinationsAdapter` and `MyceliAdapter` implement it as a 2-second-timeout GET. Fake adapters used in tests return a deterministic `{ok, detail}`.
+
+- 13 e2e tests cover:
+  - **Envelope shape**: 404 includes `error.{code,message,traceId}`; `x-request-id` header is echoed as `traceId`.
+  - **400 VALIDATION_FAILED**: empty `name` returns `fields.name` set; unknown DTO field returns `fields` set (whitelist rejection).
+  - **401 UNAUTHENTICATED**: missing cookie on `/api/projects`.
+  - **404 NOT_FOUND**: unknown route; unknown project id.
+  - **409 CONFLICT**: duplicate project name in a session.
+  - **422 BUSINESS_RULE_VIOLATION**: completing a project with no rooms.
+  - **502 STORAGE_FAILED**: pipe integrity (the AI/storage code paths already cover this in M9/M13/M14; here we lock down the envelope shape under a forced storage failure).
+  - **Health**: `/api/health/live` 200; `/api/health/ready` 200 when all checks pass; `/api/health/ready` 503 when the AI adapter reports `ok: false`.
+
+- Bugs found and fixed during M15 verification (lessons recorded):
+  - **Legacy test app bootstrap skips the pipe**: most e2e tests boot the app with `moduleRef.createNestApplication({ logger: false })` and never call `useGlobalPipes`. Before this milestone, that meant DTO bugs were only caught in production. The new `buildTestApp` helper forces parity with `main.ts` and is the path forward for new tests.
+  - **Adding `healthcheck()` broke the FakeAiAdapter in `test/pipeline.e2e-spec.ts`**: the interface gained a method, and the existing fake didn't implement it. Fix: added `async healthcheck() { return { ok: true, latencyMs: 0, detail: 'fake' }; }` to the fake. No production behavior change.
+
+- Known limitations:
+  - `healthcheck()` makes a real network GET. If a provider's base URL returns 5xx, the readiness probe considers it "ok" (we only fail on network errors). This is intentional: a provider can be slow / partially degraded and we still want to accept traffic while the per-request path times out and surfaces `PROVIDER_TIMEOUT` to the caller.
+  - Readiness check latency is reported but not enforced. Operators are expected to monitor the 503 rate and alert on long-tail p95 latency.
+  - Validation `fields` are a flat `{path: message}` map (dot-notation for nested DTOs). The contract allows this; richer structures (codes, severities) are out of scope for v1.
+
+---
+
 ## 6. References
 
 - Product vision: `00-product-vision.md`

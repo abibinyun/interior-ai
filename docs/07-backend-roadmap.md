@@ -378,7 +378,7 @@ Branching / parallel work is permitted **only** for independent adapter spikes (
 
 ---
 
-### M15 — Failure Surface
+### M15 — Failure Surface ✅ Completed 2026-06-19
 
 **Objective**: Stabilize the public error envelope and health checks.
 

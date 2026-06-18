@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AiProviderAdapter, GenerationRequest, GenerationResult, ProviderError } from './ai-provider.adapter';
+import { AiProviderAdapter, GenerationRequest, GenerationResult, ProviderError, ProviderHealth } from './ai-provider.adapter';
 import { HTTP_FETCHER, HttpFetcher } from './pollinations.adapter';
 
 @Injectable()
@@ -85,6 +85,34 @@ export class MyceliAdapter implements AiProviderAdapter {
       contentType,
       provider: this.name,
     };
+  }
+
+  async healthcheck(): Promise<ProviderHealth> {
+    const start = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    try {
+      const res = await this.http.fetch(this.baseUrl, {
+        method: 'GET',
+        headers: {},
+        signal: controller.signal,
+        timeoutMs: 2000,
+      });
+      clearTimeout(timeout);
+      return {
+        ok: true,
+        latencyMs: Date.now() - start,
+        detail: `status=${res.status}`,
+      };
+    } catch (err) {
+      clearTimeout(timeout);
+      const e = err as Error;
+      return {
+        ok: false,
+        latencyMs: Date.now() - start,
+        detail: e?.message ?? 'unreachable',
+      };
+    }
   }
 
   private mapNetworkError(err: unknown): ProviderError {
