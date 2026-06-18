@@ -1,19 +1,25 @@
+import { Inject } from '@nestjs/common';
 import { ForbiddenError, NotFoundError } from '../common';
-import type { PrismaService } from './prisma.service';
+import { SessionContext } from '../sessions/session.context';
+import { PrismaService } from './prisma.service';
 
 /**
  * Base class for all repositories. The single point of session isolation.
  *
- * Subclasses get a `prisma` client and a `forSession(sessionId)` helper that
- * returns an object exposing only session-scoped operations. Every write/read
- * against a session-scoped table MUST go through this guard.
+ * Subclasses get a `prisma` client and a `forSession()` helper that pulls
+ * the session id from the request-scoped `SessionContext` (populated by
+ * `SessionGuard`). Every write/read against a session-scoped table MUST
+ * go through this guard.
  *
- * Cross-session data access (rule S-05) is enforced at this layer, not at the
- * controller layer. The denormalized `session_id` columns (ADR-005) are an
- * independent defense layer, not a substitute for this one.
+ * Cross-session data access (rule S-05) is enforced at this layer, not at
+ * the controller layer. The denormalized `session_id` columns (ADR-005) are
+ * an independent defense layer, not a substitute for this one.
  */
 export abstract class BaseRepository {
-  protected constructor(protected readonly prisma: PrismaService) {}
+  protected constructor(
+    @Inject(PrismaService) protected readonly prisma: PrismaService,
+    @Inject(SessionContext) private readonly sessionContext: SessionContext,
+  ) {}
 
   /**
    * Round-trip a trivial query to verify the database is reachable.
@@ -27,15 +33,17 @@ export abstract class BaseRepository {
   /**
    * Begin a session-scoped read/write scope.
    *
-   * Pass the validated session identifier from `SessionGuard`. The returned
-   * object exposes `findBySession`, `findManyBySession`, and `requireOwned`
-   * helpers. Subclasses may add their own session-scoped methods on top.
+   * Resolves the session id from the request-scoped `SessionContext`
+   * (populated by `SessionGuard`). Throws `UNAUTHENTICATED` if no session
+   * is present. The returned `SessionScope` exposes `findBySession`,
+   * `findManyBySession`, and `requireOwned` helpers. Subclasses may add
+   * their own session-scoped methods on top.
    */
-  protected forSession(sessionId: string): SessionScope {
-    if (!sessionId || typeof sessionId !== 'string') {
-      throw new ForbiddenError('Session scope requires a non-empty sessionId.');
+  protected forSession(): SessionScope {
+    if (!this.sessionContext.isAuthenticated) {
+      throw new ForbiddenError('No session in request context.');
     }
-    return new SessionScope(sessionId);
+    return new SessionScope(this.sessionContext.sessionId);
   }
 }
 

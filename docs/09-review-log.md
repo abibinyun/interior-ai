@@ -35,6 +35,24 @@ Each entry follows this template:
 
 ## 2. Reviews
 
+### 2026-06-18 — M3 Session
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved with notes**
+- Scope reviewed: `apps/backend/src/sessions/session.context.ts`, `session.guard.ts`, `sessions.module.ts`, `apps/backend/src/prisma/base.repository.ts`, `apps/backend/test/session-guard.e2e-spec.ts`
+- Notes:
+  - SessionGuard resolves the `sid` cookie, loads the session row, and populates the request-scoped `SessionContext`.
+  - `BaseRepository.forSession()` now reads from `SessionContext` (no parameter threading).
+  - **Design decision**: Guard is applied per-controller via `@UseGuards(SessionGuard)` rather than globally via `APP_GUARD`. Reason: the `useFactory`/`useClass` global-guard approaches had DI issues with the request-scoped `SessionContext` in the vitest/SWC test environment. Per-controller application is simpler, more explicit, and works reliably.
+  - Public routes (health, session creation) simply do not apply the guard.
+  - 8 e2e tests added covering: no cookie → 401, empty cookie → 401, unknown session id → 200 (session created), valid cookie → 200, session reuse, public routes.
+  - The "unknown session id" test expects 200 (not 401) because the guard's `issueOrRefresh` is designed to create sessions for unknown ids (session recovery). This is intentional per rule S-02.
+- Action items:
+  - M4 (Projects) will apply `@UseGuards(SessionGuard)` to `ProjectsController`.
+  - Consider a global guard in a future milestone if more controllers accumulate and the per-controller approach becomes verbose.
+
+---
+
 ### 2026-06-17 — Documentation Set v1
 
 - Reviewer: Project Owner (self)

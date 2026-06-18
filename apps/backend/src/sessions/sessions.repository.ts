@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma';
 import { BaseRepository } from '../prisma/base.repository';
+import { SessionContext } from './session.context';
 
 @Injectable()
 export class SessionsRepository extends BaseRepository {
-  constructor(prisma: PrismaService) {
-    super(prisma);
+  constructor(prisma: PrismaService, sessionContext: SessionContext) {
+    super(prisma, sessionContext);
   }
 
   /**
