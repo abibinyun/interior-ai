@@ -6,6 +6,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { HealthModule } from './health';
 import { AllExceptionsFilter, RequestIdMiddleware } from './common';
 import { loadEnv } from './config';
+import { GenerationsModule } from './generations/generations.module';
 import { PrismaModule } from './prisma';
 import { ProjectsModule } from './projects/projects.module';
 import { RoomsModule } from './rooms/rooms.module';
@@ -52,6 +53,7 @@ import { StylesModule } from './styles/styles.module';
     HealthModule,
     ProjectsModule,
     RoomsModule,
+    GenerationsModule,
     StylesModule,
   ],
   providers: [

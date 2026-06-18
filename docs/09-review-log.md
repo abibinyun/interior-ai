@@ -35,6 +35,28 @@ Each entry follows this template:
 
 ## 2. Reviews
 
+### 2026-06-18 — M8 Generations Core
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/generations/`, `apps/backend/test/generations.e2e-spec.ts`
+- Notes:
+  - `POST /api/rooms/:roomId/generations` creates a batch of exactly 3 PENDING generations (G-01).
+  - Each option_index 1/2/3 receives a distinct composed prompt (ADR-009 variation strategy: balanced / warm / bright).
+  - `PromptComposer` builds server-side prompts from style + room type + brief + refinements (G-06). Never accepts a full prompt from client (G-07).
+  - Room status transitions to `GENERATING` on batch start.
+  - Refinement endpoint accepts `parentGenerationId` (G-05); parent must be COMPLETED.
+  - Status state machine: PENDING → PROCESSING → COMPLETED/FAILED (G-02..G-04).
+  - Cross-session → 404.
+  - 13 e2e tests cover: batch creation (3 PENDING), prompt composition, 3 distinct variations, room transition, refinement, B-01 length validation, 404 for unknown room, cross-session denial.
+  - **M8 does NOT call the AI provider or storage** — it creates PENDING rows and composes prompts. M9 (Generation Pipeline) will consume these, call the AI adapter, upload to storage, and update status.
+  - `parentGenerationId` validation: belongs to same room + status === COMPLETED.
+- Action items:
+  - M9 will wire `AiProviderAdapter` + `StorageAdapter` into the pipeline: PENDING → PROCESSING → generate → upload → COMPLETED.
+  - M9 will also implement AI-07 (fallback on transient errors).
+
+---
+
 ### 2026-06-18 — M7 Storage Adapter
 
 - Reviewer: Project Owner (self)
