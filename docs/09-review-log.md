@@ -35,6 +35,27 @@ Each entry follows this template:
 
 ## 2. Reviews
 
+### 2026-06-18 — M6 AI Provider Adapter
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/ai/`
+- Notes:
+  - `AiProviderAdapter` interface with `GenerationRequest` / `GenerationResult` / `ProviderError`.
+  - `PollinationsAdapter` — GET request to `${base}/image/{prompt}` with width/height/seed/negative query params.
+  - `MyceliAdapter` — POST request to `${base}/v1/generate` with JSON body.
+  - Both use an injectable `HttpFetcher` (default: native `fetch`) — unit tests pass a fake.
+  - Both enforce `GENERATION_HARD_TIMEOUT_MS` via `AbortController`.
+  - Both map provider errors to stable `ProviderError.code` enum: 4xx → `PROVIDER_REJECTED`, 5xx → `PROVIDER_BROKEN`, abort → `PROVIDER_TIMEOUT`, other network → `PROVIDER_BROKEN`.
+  - `AiModule` exposes `AI_PROVIDER_ADAPTER` symbol; selection via `AI_PROVIDER` env (`pollinations` | `myceli`).
+  - 15 unit tests (9 Pollinations, 6 Myceli) using fake HTTP fetcher.
+  - No controller endpoint (per scope) — adapter is consumed by M8/M9.
+- Action items:
+  - M7 (Storage Adapter) will provide the upload target.
+  - M8 (Generations Core) will consume `AI_PROVIDER_ADAPTER`.
+
+---
+
 ### 2026-06-18 — M5 Rooms + Briefs
 
 - Reviewer: Project Owner (self)
