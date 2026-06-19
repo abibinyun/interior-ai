@@ -18,12 +18,24 @@ COPY --from=deps /repo/node_modules ./node_modules
 COPY apps/backend ./apps/backend
 COPY apps/backend/tsconfig.json ./tsconfig.json
 COPY apps/backend/tsconfig.build.json ./tsconfig.build.json
+ARG APP_VERSION=0.0.0
+ARG GIT_COMMIT=unknown
+ARG BUILD_AT=unknown
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV BUILD_AT=${BUILD_AT}
 RUN npx nest build -p apps/backend/tsconfig.build.json
 
 # --- runtime ---
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+ARG APP_VERSION=0.0.0
+ARG GIT_COMMIT=unknown
+ARG BUILD_AT=unknown
+ENV APP_VERSION=${APP_VERSION}
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV BUILD_AT=${BUILD_AT}
 
 RUN apk add --no-cache openssl libc6-compat wget
 

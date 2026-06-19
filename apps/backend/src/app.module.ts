@@ -37,6 +37,20 @@ import { StylesModule } from './styles/styles.module';
                 }
               : undefined,
             customProps: () => ({ service: 'backend' }),
+            customLogLevel: (_req, res, err) => {
+              if (err || res.statusCode >= 500) return 'error';
+              if (res.statusCode >= 400) return 'warn';
+              return 'info';
+            },
+            serializers: {
+              req: (req: { method: string; url: string; sessionId?: string; id?: string }) => ({
+                method: req.method,
+                url: req.url,
+                sessionId: req.sessionId,
+                requestId: req.id,
+              }),
+              res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
+            },
             genReqId: (req, res) => {
               const incoming = req.headers['x-request-id'];
               const id =

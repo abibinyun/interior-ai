@@ -288,7 +288,9 @@ describe('M15 — Failure Surface', () => {
       app = await buildApp({ storage: new FakeStorageOk(), ai: new FakeAiOk() });
       prisma = app.get(PrismaService);
       const res = await request(app.getHttpServer()).get('/api/health/live').expect(200);
-      expect(res.body).toEqual({ status: 'ok' });
+      expect(res.body.status).toBe('ok');
+      expect(typeof res.body.version).toBe('string');
+      expect(typeof res.body.commit).toBe('string');
     });
 
     it('GET /api/health/ready returns 200 with all three checks when up', async () => {

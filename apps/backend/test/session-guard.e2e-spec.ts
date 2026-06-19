@@ -115,7 +115,7 @@ describe('M3 — Session Guard', () => {
     it('health endpoint stays public (no cookie required)', async () => {
       const res = await request(app.getHttpServer()).get('/api/health/live');
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({ status: 'ok' });
+      expect(res.body.status).toBe('ok');
     });
 
     it('session endpoint creates a session without a cookie', async () => {

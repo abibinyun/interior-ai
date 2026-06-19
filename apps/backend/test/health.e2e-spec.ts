@@ -22,7 +22,9 @@ describe('Health & Error Envelope (M1 smoke)', () => {
 
   it('GET /api/health/live returns 200 with status:ok', async () => {
     const res = await request(app.getHttpServer()).get('/api/health/live').expect(200);
-    expect(res.body).toEqual({ status: 'ok' });
+    expect(res.body.status).toBe('ok');
+    expect(typeof res.body.version).toBe('string');
+    expect(typeof res.body.commit).toBe('string');
   });
 
   it('Unknown route returns the standardized error envelope', async () => {

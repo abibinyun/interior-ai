@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma';
 import { AI_PROVIDER_ADAPTER, AiProviderAdapter } from '../ai/adapters/ai-provider.adapter';
 import { STORAGE_ADAPTER, StorageAdapter } from '../storage/storage.adapter';
+import { BuildInfo, loadBuildInfo } from '../common/build-info';
 
 type CheckState = 'ok' | 'down';
 
@@ -15,6 +16,9 @@ interface CheckResult {
 
 interface ReadinessReport {
   status: 'ok' | 'down';
+  version: string;
+  commit: string;
+  builtAt: string;
   checks: {
     db: CheckResult;
     storage: CheckResult;
@@ -24,34 +28,26 @@ interface ReadinessReport {
 
 @Controller('health')
 export class HealthController {
+  private readonly buildInfo: BuildInfo;
+
   constructor(
     @Inject(ConfigService) private readonly config: ConfigService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AI_PROVIDER_ADAPTER) private readonly ai: AiProviderAdapter,
     @Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter,
-  ) {}
-
-  /**
-   * 11.1 Liveness — the process is up and accepting connections.
-   *
-   * Always returns 200 unless the runtime is broken. This is what a
-   * load balancer or container orchestrator should hit to decide
-   * whether to keep sending traffic.
-   */
-  @Get('live')
-  live(): { status: 'ok' } {
-    return { status: 'ok' };
+  ) {
+    this.buildInfo = loadBuildInfo();
   }
 
-  /**
-   * 11.2 Readiness — every external dependency is reachable.
-   *
-   * Runs three checks (DB, storage, AI) in parallel with short
-   * timeouts. Returns 503 if any check fails so a reverse proxy /
-   * orchestrator can drain this instance until the dependency
-   * recovers. The body always has the same shape so monitoring
-   * dashboards can parse it without conditional logic.
-   */
+  @Get('live')
+  live(): { status: 'ok'; version: string; commit: string } {
+    return {
+      status: 'ok',
+      version: this.buildInfo.version,
+      commit: this.buildInfo.commit,
+    };
+  }
+
   @Get('ready')
   async ready(@Res({ passthrough: true }) res: Response): Promise<ReadinessReport> {
     const [db, storage, ai] = await Promise.all([
@@ -63,6 +59,9 @@ export class HealthController {
     res.status(allOk ? 200 : 503);
     return {
       status: allOk ? 'ok' : 'down',
+      version: this.buildInfo.version,
+      commit: this.buildInfo.commit,
+      builtAt: this.buildInfo.builtAt,
       checks: { db, storage, ai },
     };
   }

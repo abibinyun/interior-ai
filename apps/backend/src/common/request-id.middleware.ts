@@ -3,9 +3,11 @@ import { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 
 export const REQUEST_ID_HEADER = 'x-request-id';
+export const SESSION_COOKIE_DEFAULT = 'sid';
 
 interface RequestWithContext extends Request {
   requestId?: string;
+  sessionId?: string;
 }
 
 @Injectable()
@@ -15,6 +17,13 @@ export class RequestIdMiddleware implements NestMiddleware {
     const requestId = typeof incoming === 'string' && incoming.length > 0 ? incoming : randomUUID();
     req.requestId = requestId;
     res.setHeader(REQUEST_ID_HEADER, requestId);
+
+    const cookieName = (process.env.SESSION_COOKIE_NAME as string | undefined) ?? SESSION_COOKIE_DEFAULT;
+    const raw = req.cookies?.[cookieName];
+    if (typeof raw === 'string' && raw.length > 0) {
+      req.sessionId = raw;
+    }
+
     next();
   }
 }

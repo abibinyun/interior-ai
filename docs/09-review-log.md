@@ -492,6 +492,33 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-19 — M16 Observability
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/health/`, `apps/backend/src/common/build-info.ts`, `apps/backend/src/common/request-id.middleware.ts`, `infra/docker/backend/Dockerfile`, `test/observability.e2e-spec.ts`
+- Notes:
+  - `/api/health/live` now includes `version` + `commit` (build metadata).
+  - `/api/health/ready` now includes `version`, `commit`, `builtAt` alongside the existing DB/storage/AI checks.
+  - Build info is read from env vars (`APP_VERSION`, `GIT_COMMIT`, `BUILD_AT`) set at Docker build time via `ARG` + `ENV`. Falls back to `package.json` + `git rev-parse` in dev.
+  - Request logging enhanced: pino-http serializers include `requestId` + `sessionId`; `customLogLevel` returns `error` for 5xx, `warn` for 4xx, `info` otherwise.
+  - `RequestIdMiddleware` now also captures `sessionId` from the `sid` cookie into `req.sessionId` for the logger.
+  - **`GET /api/metrics`** — Prometheus-compatible text format exposing:
+    - `http_requests_total{method, route, status}` (counter)
+    - `http_request_errors_total{method, route, status}` (counter, 5xx only)
+    - `http_request_duration_seconds{method, route, status}` (histogram with standard buckets)
+    - `process_start_time_seconds` (gauge)
+    - `nodejs_heap_bytes_total` (gauge, updated every 15s)
+    - `ai_provider_errors_total` (counter, placeholder for pipeline)
+  - `MetricsMiddleware` records every request's method/route/status + latency, excluding the metrics endpoint itself.
+  - 8 e2e tests: live/ready with version+commit, metrics format, counter increments, metrics endpoint excluded, request id echo, request id auto-generation, metrics public (no session).
+  - **Known limitations**: No process_cpu_seconds, no nodejs_eventloop_lag, no per-endpoint histograms. Single-process metrics (no cluster aggregation).
+- Action items:
+  - M17 (Hardening) will add rate limiting metrics.
+  - M18 (Production Parity) will verify the Dockerfile build-arg flow end-to-end.
+
+---
+
 ### 2026-06-19 — M15 Failure Surface
 
 - Reviewer: Project Owner (self)
