@@ -1,4 +1,5 @@
 import { IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+import { SanitizeFreeText } from '../../common/sanitize';
 
 export class AddReferenceDto {
   @IsString()
@@ -18,5 +19,6 @@ export class AddReferenceDto {
   @IsOptional()
   @IsString()
   @MaxLength(500)
+  @SanitizeFreeText()
   caption?: string;
 }

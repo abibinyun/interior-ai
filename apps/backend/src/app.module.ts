@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { HealthModule } from './health';
 import { AllExceptionsFilter, RequestIdMiddleware } from './common';
+import { SecurityHeadersMiddleware } from './common/security-headers.middleware';
 import { loadEnv } from './config';
 import { ExportsModule } from './exports/exports.module';
 import { GenerationsModule } from './generations/generations.module';
@@ -83,6 +84,6 @@ import { StylesModule } from './styles/styles.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    consumer.apply(RequestIdMiddleware).forRoutes('*');
+    consumer.apply(RequestIdMiddleware, SecurityHeadersMiddleware).forRoutes('*');
   }
 }

@@ -492,6 +492,23 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-19 — M17 Hardening
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/common/{rate-limit.guard,security-headers.middleware,sanitize}.ts`, `apps/backend/src/main.ts`, `apps/backend/src/generations/generations.module.ts`, DTO updates, `test/hardening.e2e-spec.ts`
+- Notes:
+  - **Rate limiting** (`RateLimitGuard`): sliding-window in-memory bucket keyed by session cookie (sid) or client IP. Configured per `RateLimitGuard` instance via `RATE_LIMIT_CONFIG` token. APP_GUARD in `GenerationsModule` applies the limiter globally but `shouldLimit()` narrows the trigger to `/generations` and `/approval` paths so public routes are unaffected. `RATE_LIMIT_GENERATIONS_PER_MIN` defaults to 5 per ADR-013. `RATE_LIMIT_DISABLED` env flag lets test suites run unbounded.
+  - **Security headers** (`SecurityHeadersMiddleware`): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` denying camera/mic/geo/interest-cohort, `Cross-Origin-Resource-Policy: same-origin`, and HSTS on TLS only. Wired in `AppModule.configure()`.
+  - **CORS lockdown**: existing `app.enableCors({ origin: corsOriginsList(env.CORS_ORIGINS), credentials: true })` was already in `main.ts`. Now exercised by M17 tests.
+  - **Request size limit**: 100 KB JSON body cap via `express.json({ limit: '100kb' })`. Oversize bodies surface as `entity.too.large` from the parser; `AllExceptionsFilter` maps the error type to `VALIDATION_FAILED` with message "Request body too large." Configurable via `MAX_REQUEST_BODY_BYTES`.
+  - **XSS sanitization** (`@SanitizeFreeText()` class-transformer decorator): strips `<script>` tags, `on*=()` event handlers, neutralizes `javascript:` / `data:` / `vbscript:` schemes, removes control characters, trims. Applied to: project name/description, room brief fields, style notes, reference caption, brief override + refinements fields.
+  - **14 e2e tests**: 5 security headers, 2 CORS, 1 body size, 3 XSS sanitization, 1 DoD burst (4th request → 429), 1 per-IP burst, 1 guard isolation (singleton).
+- Action items:
+  - M18 (Production Parity) will verify the production Dockerfile and env wiring.
+
+---
+
 ### 2026-06-19 — M16 Observability
 
 - Reviewer: Project Owner (self)

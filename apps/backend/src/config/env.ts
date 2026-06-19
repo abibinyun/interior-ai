@@ -28,6 +28,17 @@ const envSchema = z.object({
   SIGNED_URL_TTL_SECONDS: z.coerce.number().int().positive().default(900),
 
   RATE_LIMIT_PER_SESSION_PER_MIN: z.coerce.number().int().positive().default(10),
+  // AI generation rate limit (per session). Tighter than the general
+  // limit because each call is expensive (provider + storage).
+  RATE_LIMIT_GENERATIONS_PER_MIN: z.coerce.number().int().positive().default(5),
+  // Set to a very high value (or 'false') to disable rate limiting.
+  // Used by tests that make many requests within a single session.
+  RATE_LIMIT_DISABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+  // Maximum JSON request body size in bytes (M17 hardening).
+  MAX_REQUEST_BODY_BYTES: z.coerce.number().int().positive().default(100 * 1024),
   // Default true; tests can disable the auto-trigger to keep their prisma
   // updates deterministic (see ADR-014 for why we expose this).
   ENABLE_GENERATION_AUTO_TRIGGER: z

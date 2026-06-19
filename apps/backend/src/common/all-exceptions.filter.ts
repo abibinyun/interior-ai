@@ -18,7 +18,6 @@ import {
   UnauthenticatedError,
   ValidationError,
 } from './errors';
-
 interface RequestWithContext extends Request {
   requestId?: string;
 }
@@ -80,10 +79,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
       if (status === 403) return new ForbiddenError(message);
       if (status === 404) return new NotFoundError(message);
       if (status === 409) return new ConflictError(message);
+      if (status === 413) {
+        // Body parser "entity too large" — surface as VALIDATION_FAILED
+        // so the error envelope is consistent (no dedicated error class).
+        return new ValidationError('Request body too large.');
+      }
       if (status === 429) return new RateLimitedError(message);
       return new InternalError(message || 'Unexpected error.');
     }
+    // express body-parser PayloadTooLarge surfaces as a generic
+    // Error with `type: "entity.too.large"`. Map it to 413.
     if (exception instanceof Error) {
+      const e = exception as Error & { type?: string; status?: number; statusCode?: number };
+      const type = (e.type ?? '').toLowerCase();
+      if (type === 'entity.too.large' || e.statusCode === 413 || e.status === 413) {
+        return new ValidationError('Request body too large.');
+      }
       return new InternalError(exception.message || 'Unexpected error.');
     }
     return new InternalError('Unexpected error.');

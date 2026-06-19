@@ -2,8 +2,10 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import cookieParser from 'cookie-parser';
+import express from 'express';
 import { AppModule } from './app.module';
 import { buildValidationPipe } from './common/validation.pipe';
+import { SecurityHeadersMiddleware } from './common/security-headers.middleware';
 import { corsOriginsList, loadEnv } from './config';
 
 async function bootstrap(): Promise<void> {
@@ -12,6 +14,17 @@ async function bootstrap(): Promise<void> {
   app.useLogger(app.get(Logger));
 
   app.use(cookieParser());
+
+  // Security headers on every response (helmet-equivalent baseline).
+  app.use((req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+    new SecurityHeadersMiddleware().use(req, res, next);
+  });
+
+  // Request size limit. JSON bodies are capped at 100 KB — more than
+  // enough for our largest DTO (the export bundle request). Anything
+  // larger is rejected before validation runs.
+  app.use(express.json({ limit: '100kb' }));
+  app.use(express.urlencoded({ limit: '100kb', extended: false }));
 
   app.enableCors({
     origin: corsOriginsList(env.CORS_ORIGINS),
