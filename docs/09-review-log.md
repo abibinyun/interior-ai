@@ -492,6 +492,27 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-19 — M18 Production Parity
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/main.ts`, `infra/docker/backend/Dockerfile`, `test/production-parity.e2e-spec.ts`
+- Notes:
+  - **Multi-stage Dockerfile** (`infra/docker/backend/Dockerfile`): `deps` → `build` → `runtime` stages, all on `node:20-alpine`. `ARG` + `ENV` for `APP_VERSION` / `GIT_COMMIT` / `BUILD_AT` propagated from build context to runtime image. `HEALTHCHECK` calls `/api/health/live` every 15s. `openssl` + `libc6-compat` for Prisma engine. `wget` for healthcheck.
+  - **Production-mode bootstrap** (`main.ts`):
+    - `trust proxy = 1` set on the Express adapter when `NODE_ENV=production` so `req.ip` reflects the real client behind a load balancer (used by `RateLimitGuard`).
+    - `CORS_ORIGINS` must be non-empty in production; bootstrap aborts with `process.exit(1)` otherwise. Prevents accidentally shipping a wildcard CORS policy to prod.
+    - Bootstrap log line now includes the app version, CORS origin count, and NODE_ENV for ops visibility.
+  - **Secure cookies** (`SessionsController`): `secure: this.config.get('NODE_ENV') === 'production'` — verified via `docker run -e NODE_ENV=production` that the `Set-Cookie` response includes `Secure` in production but not in development.
+  - **Health checks**: `/api/health/live` returns `{ status, version, commit }`; `/api/health/ready` returns DB + storage + AI checks with latency, plus `version` / `commit` / `builtAt`.
+  - **6 e2e tests** (production-parity): sessions controller unit (prod + dev construction), env loader (CORS_ORIGINS passthrough, missing-vars rejection), build metadata in /health/live, .env.example content checks.
+  - **Docker smoke verified**: production image boots, connects to external Postgres + Supabase, passes `/api/health/ready`, serves `/api/health/live` with `Set-Cookie: Secure` flag.
+- Action items:
+  - All v1 milestones complete. The project is ready for production deployment.
+  - Follow-up (out of scope for v1): Redis-backed rate limiter, distributed tracing, CI/CD pipeline.
+
+---
+
 ### 2026-06-19 — M17 Hardening
 
 - Reviewer: Project Owner (self)

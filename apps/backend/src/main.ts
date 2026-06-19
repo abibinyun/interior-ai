@@ -10,8 +10,18 @@ import { corsOriginsList, loadEnv } from './config';
 
 async function bootstrap(): Promise<void> {
   const env = loadEnv();
+  const isProd = env.NODE_ENV === 'production';
+
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
   app.useLogger(app.get(Logger));
+
+  // Trust the first proxy hop when behind a load balancer. Required
+  // for `req.ip` (rate limiter, X-Forwarded-For) to reflect the real
+  // client in production. Off in dev to avoid spoofing.
+  if (isProd) {
+    const httpAdapter = app.getHttpAdapter().getInstance() as { set: (k: string, v: unknown) => void };
+    httpAdapter.set('trust proxy', 1);
+  }
 
   app.use(cookieParser());
 
@@ -26,8 +36,16 @@ async function bootstrap(): Promise<void> {
   app.use(express.json({ limit: '100kb' }));
   app.use(express.urlencoded({ limit: '100kb', extended: false }));
 
+  // CORS: in production, the configured origins MUST be set; an
+  // empty / wildcard CORS_ORIGINS is rejected at bootstrap.
+  const allowedOrigins = corsOriginsList(env.CORS_ORIGINS);
+  if (isProd && allowedOrigins.length === 0) {
+    // eslint-disable-next-line no-console
+    console.error('FATAL: CORS_ORIGINS must be set in production.');
+    process.exit(1);
+  }
   app.enableCors({
-    origin: corsOriginsList(env.CORS_ORIGINS),
+    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });
@@ -39,7 +57,10 @@ async function bootstrap(): Promise<void> {
   await app.listen(env.PORT, '0.0.0.0');
 
   const logger = app.get(Logger);
-  logger.log(`Backend listening on http://0.0.0.0:${env.PORT}/api (env=${env.NODE_ENV})`);
+  logger.log(
+    `Backend listening on http://0.0.0.0:${env.PORT}/api (env=${env.NODE_ENV}, ` +
+    `cors_origins=${allowedOrigins.length}, app_version=${process.env.APP_VERSION ?? 'dev'})`,
+  );
 }
 
 bootstrap().catch((err) => {
