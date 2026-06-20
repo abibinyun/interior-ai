@@ -80,7 +80,7 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F2 — App Shell
+### F2 — App Shell ✅ Completed 2026-06-20
 
 **Objective**: Layout, navigation, and the project list screen (read-only).
 

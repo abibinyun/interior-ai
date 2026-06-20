@@ -492,6 +492,56 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F2 App Shell
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: enhanced `src/routes/AppShell.tsx`, real `ProjectsPage.tsx` + `ProjectDetailPage.tsx`, new `src/components/{Skeleton,EmptyState,ErrorState,ProjectCard}.tsx`, new `src/hooks/useProjects.ts`, `src/lib/error-messages.ts` (F10 early work — friendly mapping for every ErrorCode), `src/lib/format.ts`, 25 new frontend tests.
+
+- Verification:
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors
+  - `npm run test --workspace=@interior/frontend` → **35/35 pass** (10 F1 + 25 new F2)
+  - `npm run build --workspace=@interior/frontend` → Vite production bundle (222 KB JS, gzip 70 KB; 14 KB CSS, gzip 3.5 KB)
+  - `npm run test` (backend) → 205/206 pass. **One pre-existing flake**: `test/observability.e2e-spec.ts > GET /api/health/ready` returns 503 intermittently when run as part of the full suite; passes when run in isolation. Root cause: the test depends on a real network GET to `https://gen.pollinations.ai` (the AI provider's `healthcheck()`), which can transiently 503 in the test container's network. This was a known M16 limitation, not caused by F2. F2 does not introduce any new test instability. (See "Known limitations" below.)
+
+- F2 deliverables:
+  - **`AppShell` v2** — branded wordmark + tagline, active-link styling via React Router's `NavLink isActive`, disabled `aria-disabled` items for the not-yet-built nav (Style catalog, Settings), compact session-id chip in the header. Generous whitespace + sticky translucent header per architecture §4.2.
+  - **`ProjectsPage` (real)** — TanStack Query via `useProjects()`. Four states rendered:
+    - **pending** → `<SkeletonList rows={3}>` with `role="status" aria-busy="true"`.
+    - **error** → `<ErrorState error onRetry={refetch} />` with trace-id surface for support.
+    - **empty** → bespoke first-time-visitor card (matches the design language — illustration glyph, headline, supportive copy, inert "Create your first project" CTA with F3 hint).
+    - **data** → responsive grid of `<ProjectCard>`s (`sm:grid-cols-2 lg:grid-cols-3`).
+    The page-level "+ Create project" button is present but inert for F2 (the spec calls for it to be visible).
+  - **`ProjectDetailPage` (real)** — TanStack Query via `getProject(id)`. Reads project name, description, status, createdAt / completedAt, style profile (or "No style set yet"), and rooms list (with status chips). Each room links to its detail page (F4).
+  - **`ProjectCard`** — premium hover lift (`hover:-translate-y-0.5 hover:shadow-md`), status pill with role-based color (Draft / In progress / Completed), date metadata footer. Linked to `/projects/:id`.
+  - **`ErrorState`** — accessible alert (`role="alert"`) with `<h2>` heading + body + optional trace-id reference + optional retry button. Uses the friendly-error-message mapper.
+  - **`EmptyState`** — reusable primitive for "no data yet" surfaces with optional title / description / action.
+  - **`Skeleton` / `SkeletonList`** — animated-pulse primitives. `SkeletonList` includes `role="status"` + `aria-live="polite"` + `sr-only` text for screen readers.
+  - **`lib/error-messages.ts`** — F10 early work. Two functions:
+    - `friendlyErrorMessage(err)` — maps every backend `ErrorCode` to a single canonical, action-oriented sentence. Falls back to `Error.message` / the string itself / generic "Something went wrong." in that order.
+    - `friendlyErrorTitle(err)` — short banner labels per code ("Session expired", "Slow down", "Image provider issue", etc.) for use in UI chips.
+  - **`lib/format.ts`** — `formatDate`, `formatDateTime`, `formatBytes` using the browser's locale. Defensive: invalid inputs pass through unchanged.
+  - **`hooks/useProjects.ts`** — TanStack Query wrapper around `listProjects()`. 30s `staleTime` matches the global default.
+  - **25 new tests**:
+    - `error-messages.test.ts` (6) — every code maps to a non-empty friendly string; `Error.message` pass-through; non-`Error` value handling; `friendlyErrorTitle` happy paths.
+    - `format.test.ts` (8) — date / datetime / bytes formatting + invalid-input pass-through.
+    - `ProjectCard.test.tsx` (4) — name/description/status pill, "No description" fallback, completed-date rendering, link href.
+    - `EmptyState.test.tsx` (3) — title rendering, optional description, optional action.
+    - `ErrorState.test.tsx` (4) — friendly heading + message for `ApiError`, retry click handler, no trace-id when absent, custom title override.
+
+- Bugs found and fixed during F2 verification (lessons recorded):
+  - **`keyof typeof friendlyErrorMessage` was `never`**: `friendlyErrorMessage` is a function, so `keyof typeof function` is `never`. Switched to `ErrorCode[]` directly with the `ApiError` constructor accepting the typed code.
+  - **ErrorState rendered title as a `<span>` not a heading**: testing-library's accessible-name lookup for `role="heading"` failed. Fix: use `<h2>` for the title — also better UX (a clear banner heading).
+  - **`friendlyErrorMessage('something bad')` returned "Something went wrong."** instead of the string itself: the test expected string-passthrough. Fix: extend the chain to `if (typeof err === 'string') return err;` before the generic fallback.
+
+- Known limitations:
+  - The M16 observability flake surfaces when running the full backend suite; passes when running `observability.e2e-spec` in isolation. F2 does not introduce new flakiness. Future hardening: stub the `AI_PROVIDER_ADAPTER` in the observability test to avoid depending on real outbound HTTPS.
+  - `ProjectsPage` and `ProjectDetailPage` are read-only. Create / rename / style-edit / room-add all land in F3.
+  - The nav's "Style catalog" and "Settings" items are intentionally disabled (rendered as `aria-disabled` spans) so they don't 404 during F2.
+
+---
+
 ### 2026-06-20 — F1 Foundation
 
 - Reviewer: Project Owner (self)
