@@ -2,15 +2,24 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { getProject, type ProjectWithRelations } from '../api/projects';
 import { ErrorState } from '../components/ErrorState';
+import { ProjectProgress } from '../components/ProjectProgress';
+import { RoomDashboardCard } from '../components/RoomDashboardCard';
 import { Skeleton } from '../components/Skeleton';
 import { formatDate } from '../lib/format';
+import { summarizeRoomStatuses } from '../lib/room-progress';
 
 /**
- * F3 Project detail page.
+ * F3 + F7 Project detail page.
  *
- * Pulls project + style + rooms via `GET /api/projects/:id`. Now
- * with links into the Style + Rooms editors (F3 deliverable) and
+ * F3: pulls project + style + rooms via `GET /api/projects/:id`,
+ * exposes links into the Style + Rooms editors, and renders
  * action chips for the lifecycle transitions.
+ *
+ * F7: replaces the read-only room list with a cross-room
+ * dashboard. Each room renders as a `<RoomDashboardCard />`
+ * (status, optional approved thumbnail, "Design next room" CTA
+ * on approved rooms). A `<ProjectProgress />` bar at the top
+ * communicates "X of N rooms approved" at a glance.
  */
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -39,6 +48,9 @@ export function ProjectDetailPage() {
   }
 
   const p = query.data;
+  const summary = summarizeRoomStatuses(p.rooms);
+  const hasApproved = summary.approved > 0;
+
   return (
     <article className="space-y-8">
       <header className="space-y-2">
@@ -88,6 +100,8 @@ export function ProjectDetailPage() {
         )}
       </section>
 
+      <ProjectProgress total={summary.total} approved={summary.approved} />
+
       <section className="space-y-3">
         <div className="flex items-end justify-between">
           <h2 className="font-display text-xl font-semibold">Rooms</h2>
@@ -101,21 +115,13 @@ export function ProjectDetailPage() {
         {p.rooms.length === 0 ? (
           <p className="text-sm italic text-stone-400">No rooms yet.</p>
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <ul
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+            data-testid="project-room-dashboard"
+          >
             {p.rooms.map((r) => (
-              <li
-                key={r.id}
-                className="rounded-2xl border border-stone-100 bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-display text-base font-medium">{r.roomType}</span>
-                  <span className="rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
-                    {r.status}
-                  </span>
-                </div>
-                <p className="mt-2 text-xs text-stone-400">
-                  Updated {formatDate(r.updatedAt)}
-                </p>
+              <li key={r.id}>
+                <RoomDashboardCard room={r} projectId={p.id} showDesignNextCta={hasApproved} />
               </li>
             ))}
           </ul>

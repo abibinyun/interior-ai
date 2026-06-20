@@ -4,6 +4,7 @@ import {
   ConflictError,
   NotFoundError,
 } from '../common';
+import { AnchorBuilder } from '../generations/anchor-builder';
 import { SessionContext } from '../sessions/session.context';
 import { CreateRoomDto } from './dto/create-room.dto';
 import { UpdateBriefDto } from './dto/update-brief.dto';
@@ -14,6 +15,7 @@ export class RoomsService {
   constructor(
     @Inject(RoomsRepository) private readonly repo: RoomsRepository,
     @Inject(SessionContext) private readonly sessionContext: SessionContext,
+    @Inject(AnchorBuilder) private readonly anchorBuilder: AnchorBuilder,
   ) {}
 
   async listByProject(projectId: string): Promise<{ items: unknown[] }> {
@@ -40,7 +42,8 @@ export class RoomsService {
     if (!room) {
       throw new NotFoundError('Room not found.');
     }
-    return this.serializeRoomWithBrief(room);
+    const consistencyAnchor = await this.anchorBuilder.build(room.projectId);
+    return this.serializeRoomWithBrief(room, consistencyAnchor);
   }
 
   async updateBrief(roomId: string, dto: UpdateBriefDto): Promise<unknown> {
@@ -94,7 +97,7 @@ export class RoomsService {
     updatedAt: r.updatedAt.toISOString(),
   });
 
-  private serializeRoomWithBrief = (r: RoomWithBrief) => ({
+  private serializeRoomWithBrief = (r: RoomWithBrief, consistencyAnchor: string | null = null) => ({
     ...this.serializeRoom(r),
     designBrief: r.designBrief
       ? {
@@ -107,5 +110,6 @@ export class RoomsService {
           updatedAt: r.designBrief.updatedAt.toISOString(),
         }
       : null,
+    consistencyAnchor,
   });
 }

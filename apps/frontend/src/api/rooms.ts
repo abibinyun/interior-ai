@@ -27,6 +27,14 @@ export interface Room {
    * when no brief has been written yet.
    */
   designBrief?: DesignBrief | null;
+  /**
+   * Read-only consistency anchor string for the project, included in
+   * `GET /api/rooms/:id`. Null when the project has no style profile
+   * AND no approved rooms (per CA-01). Surfaced at the top of room
+   * screens so the user can see the house-wide design language their
+   * new generations will inherit.
+   */
+  consistencyAnchor?: string | null;
 }
 
 export interface DesignBrief {

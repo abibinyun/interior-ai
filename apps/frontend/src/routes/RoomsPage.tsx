@@ -2,11 +2,13 @@ import { Link, useParams } from 'react-router-dom';
 import { ApiError } from '../lib/error';
 import { ErrorState } from '../components/ErrorState';
 import { Modal } from '../components/Modal';
+import { ProjectProgress } from '../components/ProjectProgress';
 import { RoomStatusChip } from '../components/RoomStatusChip';
 import { SelectField } from '../components/FormField';
 import { Skeleton } from '../components/Skeleton';
 import { useCreateRoom, useProjectRooms } from '../hooks/useProjectRooms';
 import { useProject } from '../hooks/useProject';
+import { summarizeRoomStatuses } from '../lib/room-progress';
 import { useState } from 'react';
 import type { RoomType } from '../api/rooms';
 
@@ -53,6 +55,7 @@ export function RoomsPage() {
 
   const usedTypes = new Set(rooms.data.items.map((r) => r.roomType));
   const availableOptions = ROOM_TYPE_OPTIONS.filter((o) => !usedTypes.has(o.value));
+  const summary = summarizeRoomStatuses(rooms.data.items);
 
   return (
     <section className="space-y-8">
@@ -79,6 +82,8 @@ export function RoomsPage() {
           + Add room
         </button>
       </header>
+
+      <ProjectProgress total={summary.total} approved={summary.approved} />
 
       {rooms.data.items.length === 0 ? (
         <EmptyRoomsHint onAdd={() => setOpen(true)} />

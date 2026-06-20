@@ -525,6 +525,60 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+---
+
+### 2026-06-20 — F7 Cross-room UX
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `<StyleAnchorBanner>` + `<RoomDashboardCard>` + `<ProjectProgress>` components, `summarizeRoomStatuses` helper in `src/lib/room-progress.ts`, integration into `<ProjectDetailPage>` (cross-room dashboard), `<RoomsPage>` (progress bar), `<RoomDetailPage>` (anchor banner at top), small backend wiring so `GET /api/rooms/:id` now returns `consistencyAnchor: string | null` per API contract §7.3 (3 files: `generations.module.ts` exports `AnchorBuilder`, `rooms.module.ts` imports `GenerationsModule`, `rooms.service.ts` calls `anchorBuilder.build(projectId)` inside `get()` and surfaces the result), 4 new backend e2e tests in `rooms.e2e-spec.ts` covering the new field, 21 new frontend tests across `StyleAnchorBanner.test.tsx`, `ProjectProgress.test.tsx`, `RoomDashboardCard.test.tsx`, and `room-progress.test.ts`. Footer bumped to `v0.7 — F1–F7`.
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run test:backend` → **218/218 pass** (was 214 + 4 new for the anchor on room GET)
+  - `npm run test:frontend` → **92/92 pass** (was 71 + 21 new for the F7 components)
+  - `npm run build` (backend + frontend) → clean
+  - `docker compose restart backend && docker compose restart frontend` → live
+  - **End-to-end Playwright walkthrough**: created a fresh project, set style JAPANDI, added Living Room, generated, approved, added Kitchen (BRIEF_DRAFT); verified (1) the project dashboard shows the Living Room card with its approved thumbnail + "Design next room →" CTA, (2) the Kitchen card with placeholder + helper copy, (3) the progress bar "1 of 2 approved", and (4) BOTH rooms render the same `<StyleAnchorBanner>` with `House-wide design language: style=JAPANDI | living room: ...` at the top.
+
+- F7 deliverables:
+  - **`<StyleAnchorBanner>`** — renders nothing when `anchor` is null/undefined/empty (CA-01), shows the CA-prefixed banner with the anchor text when set. `role="note"` + `aria-label` for screen readers. Used on every room screen so the user understands "why does this generation feel consistent with the rest of the house?".
+  - **`<RoomDashboardCard>`** — accepts a loose `room` shape (works with both the strict `Room` payload and the looser `ProjectWithRelations.rooms[i]` summary) and a required `projectId` prop. Renders the approved-generation thumbnail via the `/api/images/generations/:id` proxy (we trust the M12 invariant that an approved generation is COMPLETED, so no extra fetch). On `imageError` falls back to the placeholder. When `showDesignNextCta` is true AND the room is APPROVED, surfaces a `Design next room →` link back to the rooms list (the dashboard parent passes the `projectId`, no backend change needed for this). Forest-green ring around the thumbnail + "✓ Approved" badge.
+  - **`<ProjectProgress>`** — compact `<progressbar role>` with "X of N approved" label; turns forest-green when `approved === total` and the heading switches to "All rooms approved". `aria-valuemin/max/now` wired. Used on both the project detail page and the rooms list page.
+  - **`summarizeRoomStatuses`** — pure helper in `src/lib/room-progress.ts` (extracted from `ProjectProgress.tsx` to satisfy `react-refresh/only-export-components`). Returns `{ total, approved }` for an arbitrary list of `{ status }`.
+  - **`<ProjectDetailPage>`** — replaced the read-only rooms list with the cross-room dashboard. The `showDesignNextCta` prop is wired to `hasApproved = summary.approved > 0`, so the CTA only appears once the user has at least one approval.
+  - **`<RoomsPage>`** — `<ProjectProgress>` inserted between the header and the rooms list. No structural changes to the room cards (kept the F3 list semantics) — the dashboard view is the new canonical "all rooms" surface.
+  - **`<RoomDetailPage>`** — `<StyleAnchorBanner>` inserted immediately after the header. No other changes.
+  - **`AppShell`** — footer version bumped to `v0.7 — F1–F7`.
+
+- 21 new frontend tests:
+  - `StyleAnchorBanner.test.tsx` (5) — null/undefined/empty anchor renders nothing; renders anchor text inside the banner; exposes the banner via `role="note"` with the right `aria-label`.
+  - `ProjectProgress.test.tsx` (4) — `0 of 0` with empty bar; raw counts in the label; "All rooms approved" heading at 100%; rounding for non-divisible totals.
+  - `RoomDashboardCard.test.tsx` (8) — placeholder vs image (with correct `src` = `/api/images/generations/:id`); "Design next room" CTA gated on `showDesignNextCta` + APPROVED; status chip rendering across all four `RoomStatus` values; thumbnail link to room detail; `placeholderLabel` override.
+  - `room-progress.test.ts` (4) — empty list → zeros; counts only APPROVED; accepts loose-string statuses (matches the `ProjectWithRelations` shape); ignores unknown future statuses.
+
+- 4 new backend tests (`rooms.e2e-spec.ts`, "Consistency anchor on GET /api/rooms/:id"):
+  - Returns `null` anchor when no sibling room is approved.
+  - Returns the anchor string on a sibling room once one is approved (style + approved-room segments).
+  - Returns the anchor on the approved room itself (style-only segment).
+  - After reopening the approved room, the anchor loses the approved-room segment but keeps the style segment.
+
+- Bugs found and fixed during F7 verification (lessons recorded):
+  - **`humanizeRoomType` and `summarizeRoomStatuses` triggered `react-refresh/only-export-components` warnings**: file-exported both a component and a helper function. Fix: inlined `humanizeRoomType` inside `RoomDashboardCard.tsx` (private, no `export`), moved `summarizeRoomStatuses` into its own `src/lib/room-progress.ts` file.
+  - **`Pick<Room, ...>` was too narrow for the dashboard's loose `ProjectWithRelations.rooms[i]` shape** (`status: string` vs `RoomStatus`): the typecheck rejected the spread. Fix: `<RoomDashboardCard>` accepts a wide `{ status: RoomStatus | string }` union; status comparisons cast as needed.
+  - **`projectId` was missing on `ProjectWithRelations.rooms[i]`**: my first cut relied on `room.projectId` to build the "Design next room →" href, but the backend doesn't echo it on the room summary. Fix: required `projectId` as a top-level prop on `<RoomDashboardCard>` and pass `projectId={p.id}` from the dashboard parent. Avoided a backend round-trip and kept the component contract explicit.
+  - **Footer version drift**: bumped `v0.6 — F1–F6` → `v0.7 — F1–F7`.
+
+- Known limitations:
+  - "Design next room" CTA only surfaces on approved rooms. When zero rooms are approved, the dashboard parent passes `showDesignNextCta={false}`; F11 polish may add an always-visible "Add room" shortcut on the dashboard card regardless of status.
+  - The "approved history ribbon" (which generations were approved previously) is not surfaced; the backend preserves all generations immutably but the UI shows only the current pointer.
+  - The anchor banner only renders on the room detail page, not on the generations page; F11 polish can decide whether to duplicate it there too.
+
+---
+
+---
+
 ### 2026-06-20 — F6 Approval UX
 
 - Reviewer: Project Owner (self)

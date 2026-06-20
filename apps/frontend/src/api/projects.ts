@@ -20,6 +20,7 @@ export interface ProjectWithRelations extends Project {
   } | null;
   rooms: Array<{
     id: string;
+    projectId: string;
     roomType: string;
     status: string;
     approvedGenerationId: string | null;

@@ -189,19 +189,25 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F7 — Cross-room UX
+### F7 — Cross-room UX ✅ Completed 2026-06-20
 
 **Objective**: Make consistency visible across rooms.
 
 **Scope**
 
-- Project dashboard showing each room with status, thumbnail of approved generation, and a progress indicator.
-- "Design Next Room" CTA on approved rooms.
-- Visible "Style anchor" indicator (read-only summary) at the top of every room screen once at least one sibling is approved.
+- **`<StyleAnchorBanner>`** at the top of every room screen — surfaces the server-computed consistency anchor (per ADR-011) so the user can see the house-wide design language their new generations will inherit. Read-only, returns null when there is nothing to anchor on (CA-01).
+- **`<RoomDashboardCard>`** replaces the read-only rooms list on the project detail page: humanized room type, `<RoomStatusChip>`, approved-generation thumbnail (or tinted placeholder), status-dependent helper copy, link to the room detail page, plus a "Design next room →" CTA on approved rooms (gated by `showDesignNextCta` so it only surfaces when at least one sibling is approved).
+- **`<ProjectProgress>`** bar on both the project detail page and the rooms list page: "X of N approved" with a `<progressbar role>`; turns forest-green at 100%.
+- **`summarizeRoomStatuses`** (pure helper in `src/lib/room-progress.ts`) — counts APPROVED rooms; shared by both pages.
 
-**DoD**
+**Out of Scope**
 
-- A 2-room project visually communicates: room 1 approved (with anchor summary), room 2 in progress with anchor visible.
+- "Approved history ribbon" on approved rooms (deferred to F11 polish).
+- Per-room consistency scoring or alignment metrics.
+
+**DoD** ✅
+
+- Verified end-to-end via Playwright: a 2-room project (Living Room APPROVED + Kitchen BRIEF_DRAFT) renders the CA banner with the living-room segment on **both** rooms, the dashboard shows the living-room thumbnail + "Design next room" CTA, and the progress bar reads "1 of 2 approved".
 
 ---
 

@@ -51,6 +51,6 @@ import { PromptComposer } from './prompt-composer';
       useExisting: RateLimitGuard,
     },
   ],
-  exports: [GenerationsService, RateLimitGuard],
+  exports: [AnchorBuilder, GenerationsService, RateLimitGuard],
 })
 export class GenerationsModule {}

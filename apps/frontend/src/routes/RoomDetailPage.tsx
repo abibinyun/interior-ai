@@ -4,6 +4,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorState } from '../components/ErrorState';
 import { BriefEditor } from '../components/BriefEditor';
 import { Skeleton } from '../components/Skeleton';
+import { StyleAnchorBanner } from '../components/StyleAnchorBanner';
 import { useRoom } from '../hooks/useRoomBrief';
 import { useGenerationsByRoom, useReopenRoom } from '../hooks/useGenerations';
 import { getGenerationImageUrl } from '../api/generations';
@@ -79,6 +80,8 @@ export function RoomDetailPage() {
           Approved generation: {r.approvedGenerationId ?? 'none'}
         </p>
       </header>
+
+      <StyleAnchorBanner anchor={r.consistencyAnchor ?? null} />
 
       <section className="space-y-4">
         <div className="flex items-end justify-between">

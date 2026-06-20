@@ -212,6 +212,115 @@ describe('M5 — Rooms + Briefs', () => {
     });
   });
 
+  describe('Consistency anchor on GET /api/rooms/:id (F7 wire-up)', () => {
+    let sessionId: string;
+    let projectId: string;
+    let livingId: string;
+    let kitchenId: string;
+    let approvedGenerationId: string;
+
+    beforeAll(async () => {
+      sessionId = await createSession(app);
+      projectId = await createProject(app, sessionId, 'AnchorRoomTest');
+
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/style`)
+        .set('Cookie', `sid=${sessionId}`)
+        .send({ styleKey: 'JAPANDI', styleNotes: 'warm woods' });
+
+      const living = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/rooms`)
+        .set('Cookie', `sid=${sessionId}`)
+        .send({ roomType: 'LIVING_ROOM' });
+      livingId = living.body.id as string;
+      await request(app.getHttpServer())
+        .put(`/api/rooms/${livingId}/brief`)
+        .set('Cookie', `sid=${sessionId}`)
+        .send({ purpose: 'family relaxation' });
+
+      const batch = await request(app.getHttpServer())
+        .post(`/api/rooms/${livingId}/generations`)
+        .set('Cookie', `sid=${sessionId}`)
+        .send({});
+      approvedGenerationId = batch.body.items[0].id as string;
+      await prisma.generation.update({
+        where: { id: approvedGenerationId },
+        data: {
+          status: 'COMPLETED',
+          prompt: 'Japandi living room with low oak sofa and morning light.',
+          imageUrl: `https://test.storage/${approvedGenerationId}.png`,
+          storageObjectKey: `test/${approvedGenerationId}.png`,
+        },
+      });
+      await request(app.getHttpServer())
+        .post(`/api/rooms/${livingId}/approval`)
+        .set('Cookie', `sid=${sessionId}`)
+        .send({ generationId: approvedGenerationId });
+
+      const kitchen = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/rooms`)
+        .set('Cookie', `sid=${sessionId}`)
+        .send({ roomType: 'KITCHEN' });
+      kitchenId = kitchen.body.id as string;
+    });
+    afterAll(async () => {
+      await cleanup(sessionId);
+    });
+
+    it('returns null anchor when no sibling room is approved yet', async () => {
+      const sid = await createSession(app);
+      try {
+        const projId = await createProject(app, sid, 'NoAnchor');
+        const room = await request(app.getHttpServer())
+          .post(`/api/projects/${projId}/rooms`)
+          .set('Cookie', `sid=${sid}`)
+          .send({ roomType: 'LIVING_ROOM' });
+        const res = await request(app.getHttpServer())
+          .get(`/api/rooms/${room.body.id}`)
+          .set('Cookie', `sid=${sid}`);
+        expect(res.status).toBe(200);
+        expect(res.body.consistencyAnchor).toBeNull();
+      } finally {
+        await cleanup(sid);
+      }
+    });
+
+    it('returns the anchor string on a sibling room once one is approved', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/rooms/${kitchenId}`)
+        .set('Cookie', `sid=${sessionId}`);
+      expect(res.status).toBe(200);
+      expect(typeof res.body.consistencyAnchor).toBe('string');
+      expect(res.body.consistencyAnchor).toContain('House-wide design language');
+      expect(res.body.consistencyAnchor).toContain('style=JAPANDI');
+      expect(res.body.consistencyAnchor).toContain('living room:');
+    });
+
+    it('also returns the anchor on the approved room itself (style-only segment when alone)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/rooms/${livingId}`)
+        .set('Cookie', `sid=${sessionId}`);
+      expect(res.status).toBe(200);
+      expect(typeof res.body.consistencyAnchor).toBe('string');
+      expect(res.body.consistencyAnchor).toContain('style=JAPANDI');
+    });
+
+    it('returns null anchor after the approved room is reopened', async () => {
+      await request(app.getHttpServer())
+        .post(`/api/rooms/${livingId}/reopen`)
+        .set('Cookie', `sid=${sessionId}`)
+        .send({});
+      const res = await request(app.getHttpServer())
+        .get(`/api/rooms/${kitchenId}`)
+        .set('Cookie', `sid=${sessionId}`);
+      expect(res.status).toBe(200);
+      // Style segment remains, but the approved-room segment is gone — the
+      // anchor is still a non-empty string (style-only).
+      expect(res.body.consistencyAnchor).toContain('style=JAPANDI');
+      expect(res.body.consistencyAnchor).not.toContain('living room:');
+    });
+  });
+
   describe('Cross-session isolation (S-05)', () => {
     it('returns 404 when another session tries to read a room', async () => {
       const sessionA = await createSession(app);
