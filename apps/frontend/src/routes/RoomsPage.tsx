@@ -82,7 +82,7 @@ export function RoomsPage() {
 
       {rooms.data.items.length === 0 ? (
         <EmptyRoomsHint onAdd={() => setOpen(true)} />
-      ) : (
+) : (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Room list">
           {rooms.data.items.map((r) => (
             <li
@@ -98,9 +98,27 @@ export function RoomsPage() {
               <p className="mt-1 text-xs text-stone-400">
                 {r.approvedGenerationId ? 'Approved · ready to export' : 'No approval yet'}
               </p>
-              <p className="mt-3 text-xs text-stone-400">
-                Brief editor + Generate land in F4.
-              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <Link
+                  to={`/rooms/${r.id}`}
+                  className="text-xs font-medium text-forest-500 hover:text-forest-700"
+                >
+                  Brief →
+                </Link>
+                <span className="text-stone-200">·</span>
+                <Link
+                  to={`/rooms/${r.id}/generations`}
+                  className="text-xs font-medium text-forest-500 hover:text-forest-700"
+                >
+                  Generate →
+                </Link>
+                {r.approvedGenerationId ? (
+                  <>
+                    <span className="text-stone-200">·</span>
+                    <span className="text-xs text-stone-400">Ready to export</span>
+                  </>
+                ) : null}
+              </div>
             </li>
           ))}
         </ul>

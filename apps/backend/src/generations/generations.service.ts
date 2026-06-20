@@ -135,17 +135,22 @@ export class GenerationsService {
     return items.map(this.serialize);
   }
 
-  async listByRoomId(roomId: string): Promise<SerializedGeneration[]> {
-    await this.requireOwnedRoom(roomId);
+async listByRoomId(roomId: string): Promise<SerializedGeneration[]> {
+    // Read-only listing: do NOT enforce the "no generation on an
+    // APPROVED room" rule (that gates batch creation only). The
+    // frontend still wants to surface the generation history of an
+    // APPROVED room so the user can see what was approved.
+    await this.requireRoom(roomId);
     const items = await this.repo.findByRoomId(roomId);
     return items.map(this.serialize);
   }
 
-  async listByBatchIdInRoom(
+async listByBatchIdInRoom(
     roomId: string,
     batchId: string,
   ): Promise<SerializedGeneration[]> {
-    await this.requireOwnedRoom(roomId);
+    // Same read-only rationale as `listByRoomId`.
+    await this.requireRoom(roomId);
     const items = await this.repo.findByBatchId(batchId);
     const owned = items.filter((g) => g.roomId === roomId);
     if (owned.length === 0) {
