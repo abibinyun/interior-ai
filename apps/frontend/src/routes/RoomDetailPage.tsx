@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { AddReferenceModal } from '../components/AddReferenceModal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorState } from '../components/ErrorState';
 import { BriefEditor } from '../components/BriefEditor';
+import { ReferenceCard } from '../components/ReferenceCard';
 import { Skeleton } from '../components/Skeleton';
 import { StyleAnchorBanner } from '../components/StyleAnchorBanner';
 import { useRoom } from '../hooks/useRoomBrief';
 import { useGenerationsByRoom, useReopenRoom } from '../hooks/useGenerations';
+import { useDeleteReference, useReferences } from '../hooks/useReferences';
 import { getGenerationImageUrl } from '../api/generations';
+import type { Reference } from '../api/references';
 
 /**
  * F4 Room detail page.
@@ -21,8 +25,12 @@ export function RoomDetailPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const room = useRoom(roomId);
   const gens = useGenerationsByRoom(roomId);
+  const refs = useReferences(roomId);
   const reopenRoom = useReopenRoom(roomId ?? '');
+  const deleteRef = useDeleteReference(roomId ?? '');
   const [confirmReopen, setConfirmReopen] = useState(false);
+  const [openAddReference, setOpenAddReference] = useState(false);
+  const [confirmDeleteRef, setConfirmDeleteRef] = useState<Reference | null>(null);
 
   if (!roomId) return <p className="text-stone-500">No room id in the URL.</p>;
   if (room.isPending) {
@@ -129,39 +137,103 @@ export function RoomDetailPage() {
                         loading="lazy"
                       />
                     ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-stone-400">
-                        {g.status}
-                      </div>
-                    );
-                  })()}
-                </div>
-                <div className="mt-2 flex items-center justify-between text-xs text-stone-500">
-                  <span>Option {g.optionIndex}</span>
-                  <span>{g.status}</span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </article>
+                       <div className="flex h-full items-center justify-center text-xs text-stone-400">
+                         {g.status}
+                       </div>
+                     );
+                   })()}
+                 </div>
+                 <div className="mt-2 flex items-center justify-between text-xs text-stone-500">
+                   <span>Option {g.optionIndex}</span>
+                   <span>{g.status}</span>
+                 </div>
+               </li>
+             ))}
+           </ul>
+         )}
+       </section>
 
-    <ConfirmDialog
-      open={confirmReopen}
-      title="Reopen this room?"
-      description="The current approval will be cleared and the room will move back to In Review. The generation rows are preserved."
-      confirmLabel="Reopen"
-      destructive
-      pending={reopenRoom.isPending}
-      onConfirm={() => {
-        reopenRoom.mutate(undefined, {
-          onSettled: () => setConfirmReopen(false),
-        });
-      }}
-      onClose={() => setConfirmReopen(false)}
-    />
-    </>
-  );
+       <section className="space-y-3">
+         <div className="flex items-end justify-between">
+           <h2 className="font-display text-xl font-semibold">References</h2>
+           <div className="flex items-center gap-3 text-sm">
+             <Link
+               to={`/rooms/${r.id}/references`}
+               className="font-medium text-forest-500 hover:text-forest-700"
+             >
+               Manage →
+             </Link>
+             <button
+               type="button"
+               onClick={() => setOpenAddReference(true)}
+               className="inline-flex items-center gap-1.5 rounded-xl bg-stone-900 px-3 py-1.5 text-xs font-medium text-cream-50 hover:bg-stone-700"
+               data-testid="add-reference-button"
+             >
+               + Add reference
+             </button>
+           </div>
+         </div>
+         {refs.isPending ? (
+           <Skeleton className="h-24 w-full" />
+         ) : refs.isError ? (
+           <ErrorState error={refs.error} onRetry={() => refs.refetch()} />
+         ) : (refs.data?.items.length ?? 0) === 0 ? (
+           <p className="text-sm italic text-stone-400">
+             No references yet. Add a past generation, paste an external link, or upload an image.
+           </p>
+         ) : (
+           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="references-mini-list">
+             {refs.data!.items.slice(0, 3).map((ref) => (
+               <li key={ref.id}>
+                 <ReferenceCard
+                   reference={ref}
+                   onDelete={(r) => setConfirmDeleteRef(r)}
+                 />
+               </li>
+             ))}
+           </ul>
+         )}
+       </section>
+     </article>
+
+     <ConfirmDialog
+       open={confirmReopen}
+       title="Reopen this room?"
+       description="The current approval will be cleared and the room will move back to In Review. The generation rows are preserved."
+       confirmLabel="Reopen"
+       destructive
+       pending={reopenRoom.isPending}
+       onConfirm={() => {
+         reopenRoom.mutate(undefined, {
+           onSettled: () => setConfirmReopen(false),
+         });
+       }}
+       onClose={() => setConfirmReopen(false)}
+     />
+
+     <AddReferenceModal
+       open={openAddReference}
+       roomId={r.id}
+       onClose={() => setOpenAddReference(false)}
+     />
+
+     <ConfirmDialog
+       open={Boolean(confirmDeleteRef)}
+       title="Delete this reference?"
+       description="The reference row will be removed. Uploaded files are also deleted from storage when possible."
+       confirmLabel="Delete"
+       destructive
+       pending={deleteRef.isPending}
+       onConfirm={() => {
+         if (!confirmDeleteRef) return;
+         deleteRef.mutate(confirmDeleteRef.id, {
+           onSettled: () => setConfirmDeleteRef(null),
+         });
+       }}
+       onClose={() => setConfirmDeleteRef(null)}
+     />
+     </>
+   );
 }
 
 function humanizeRoomType(rt: string): string {

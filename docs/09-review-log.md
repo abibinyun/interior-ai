@@ -527,6 +527,68 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F8 References UX
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `<ReferenceCard>` + `<AddReferenceModal>` (tabbed: Generated / External link / Upload) + `<ReferencesPage>` (deep-link `/rooms/:roomId/references`) + new `<ReferencesSection>` inside `<RoomDetailPage>`. New module: `src/hooks/useReferences.ts` (`useReferences`, `useAddReference`, `useUploadReference`, `useDeleteReference`) + `useUploadReferenceWithProgress.ts` (live `percent` state). New `<RoomDetailPage>` integration (top-3 preview with "Manage →" link). Helpers: `src/lib/upload.ts` (XHR-based multipart uploader with progress events, normalizing the backend's `ApiError` envelope), `src/lib/upload-limits.ts` (`MAX_UPLOAD_BYTES` + allowed MIME types mirroring backend SG-06). Footer remains `v0.7 — F1–F7` (no bump for F8).
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run build` (backend + frontend) → clean (Vite bundle 290 KB / 85 KB gzip)
+  - `npm run test:frontend` → **110/110 pass** (was 92 + 18 new F8 tests)
+  - `npm run test:backend` → **217/218 pass** (1 pre-existing M16 observability flake — `/api/health/ready` returns 503 intermittently because it depends on a real network GET to `gen.pollinations.ai`; documented in F2 review log. F8 introduced no new test instability.)
+  - `docker compose restart backend && docker compose restart frontend` → live
+  - **End-to-end Playwright walkthrough**: opened `/rooms/{kitchen}/references`, clicked "Add reference", switched to External link tab, typed `https://www.houzz.com/photos/kitchen-ideas`, hit submit. The reference appears in the list with the URL as a click-through link, "External link" badge, and Delete button.
+  - **DoD #1 (cross-room 404)**: curl `POST /api/rooms/{kitchen}/references { sourceType: GENERATED, sourceId: "<living-room-generation>" }` → `404 NOT_FOUND { message: "Generation not found in this room." }`. Frontend surfaces via `<ErrorState />` (the `friendlyErrorMessage(NOT_FOUND)` mapper renders "We couldn't find that. It may have been deleted.").
+  - **DoD #2 (12 MB upload rejected before backend)**: covered by `AddReferenceModal.test.tsx > rejects oversize uploads client-side before any backend call` — uses `fireEvent.change` on a 12 MB `File`, asserts the `upload-client-error` element renders the friendly message and submit is disabled.
+
+- F8 deliverables:
+  - **`<ReferenceCard>`** — three render modes based on `sourceType`:
+    - GENERATED → `<img src={"/api/images/generations/" + sourceId}>` (the ORB-safe backend proxy)
+    - EXTERNAL_URL → `<a href={externalUrl} target="_blank" rel="noopener noreferrer">`
+    - UPLOADED → `<img src={reference.url}>` using the short-TTL signed URL returned on read
+    - On `imageError` (failed signed URL, broken proxy, etc.) falls back to a tinted placeholder. "From a generation" / "External link" / "Uploaded image" badge in the top-right. Caption + meta line (filename + MIME + size for UPLOADED, URL preview for EXTERNAL_URL, generation id for GENERATED). Delete button hidden when `canDelete={false}`.
+  - **`<AddReferenceModal>`** — three-tab modal built on top of the existing `<Modal>` primitive:
+    - Shared `<TextAreaField>` for caption (maxLength 500, no required)
+    - Tab buttons use `role="tab"` + `aria-selected` for a11y
+    - **GeneratedTab**: pre-fetches via `useGenerationsByRoom`, filters to `status === 'COMPLETED'`, renders the dropdown + Submit. If no COMPLETED generations exist, shows a friendly "Generate at least one option first" hint instead of an empty dropdown.
+    - **ExternalUrlTab**: `TextField type="url"`, client-side URL parse + http/https protocol check. Submit disabled until valid.
+    - **UploadTab**: file picker with `accept={ALLOWED_IMAGE_MIME_TYPES.join(',')}`. Client-side MIME + size validation in `handleFileChange` shows the friendly `data-testid="upload-client-error"` message and clears the input — no backend call. After a valid file is selected, shows the filename + size summary. Upload goes through `useUploadReferenceWithProgress` which exposes live `progress.percent` (0..100) for the progress bar. Submit disabled during upload.
+    - All tabs use `<ErrorState />` for backend errors. Per-field errors (`fields.mimeType`, `fields.size`, `fields.externalUrl`) are rendered separately.
+  - **`<ReferencesPage>`** — replaces the F1 placeholder at `/rooms/:roomId/references`. Header shows "X attached" + "Add reference" CTA. Empty state guides the user. Each card has a Delete button behind a destructive `<ConfirmDialog>`. The hook's invalidation refreshes the list automatically on add/delete.
+  - **`<RoomDetailPage>` References section** — top-3 preview with `<ReferenceCard>` and a "Manage →" link to the full page; the same `<AddReferenceModal>` is mounted here so the user can add without leaving the room.
+  - **Hooks**:
+    - `useReferences(roomId)` — query for `GET /api/rooms/:roomId/references`
+    - `useAddReference(roomId)` — mutation for `POST .../references`; on success invalidates the list
+    - `useUploadReference(roomId)` — mutation for `POST .../references/upload` (no progress)
+    - `useDeleteReference(roomId)` — mutation for `DELETE /api/references/:id`; on success invalidates the list
+    - `useUploadReferenceWithProgress(roomId)` — wraps the XHR helper, exposes `{ progress: { loaded, total, percent } | null }` for the upload tab. `onSettled` clears the progress state.
+  - **Helpers**:
+    - `src/lib/upload.ts` — `uploadWithProgress<T>({ url, file, caption?, onProgress?, signal? })` returns a Promise that resolves to the parsed JSON body (typed as `T`) on 2xx, or rejects with an `ApiError` (same shape as `apiFetch`) on non-2xx. Uses XHR because `fetch` doesn't expose upload progress in browsers.
+    - `src/lib/upload-limits.ts` — `MAX_UPLOAD_BYTES = 10 * 1024 * 1024`, `ALLOWED_IMAGE_MIME_TYPES = ['image/jpeg','image/png','image/webp']`, `isAllowedImageMimeType`, `describeUploadLimits`. Kept in `lib/` (not `components/`) so the upload tab can import without dragging a component graph.
+
+- 18 new frontend tests:
+  - `upload-limits.test.ts` (4) — `MAX_UPLOAD_BYTES` mirrors backend SG-06; allow-list is exactly the three image types; `isAllowedImageMimeType` narrows correctly; `describeUploadLimits` produces a one-line summary mentioning JPEG/PNG/WebP/10 MB.
+  - `ReferenceCard.test.tsx` (7) — GENERATED uses the backend proxy URL; EXTERNAL_URL renders as a `target="_blank" rel="noopener noreferrer"` link with the URL as accessible name; UPLOADED uses `reference.url` with filename + MIME + size meta; "No caption" fallback when caption is null; click → `onDelete(reference)`; `canDelete={false}` hides the button; placeholder renders when no image source available.
+  - `AddReferenceModal.test.tsx` (7) — default tab is GENERATED; tab switching on click; GENERATED submit posts `{ sourceType, sourceId, caption }`; EXTERNAL_URL client-side validation (disabled until valid URL); **12 MB upload rejected client-side before backend (DoD)**; bad MIME rejected client-side; backend error surfaces via `<ErrorState />` with the friendly `NOT_FOUND` message.
+
+- Bugs found and fixed during F8 verification (lessons recorded):
+  - **EXTERNAL_URL didn't render as a link in `<ReferenceCard>`**: my first cut fell through to the image branch (where `pickImageUrl` returns `null` for EXTERNAL_URL), so the user saw the "External link" badge but no actual link. Fix: hoist the EXTERNAL_URL branch above the image branch.
+  - **`<AddReferenceModal>` tests failed with "Query data cannot be undefined"**: the test QueryClient had `staleTime: 0` (the default), so on first render the hook re-fetched, the mocked `listGenerationsByRoom` returned `undefined`, and TanStack Query threw. Fix: set `staleTime: Infinity` on the test QueryClient AND give the mock an explicit `Promise.resolve({ items: [...] })` return value (defense in depth).
+  - **`(...args: unknown[]) => fn(...args)` spread in `vi.mock`** flagged `TS2556` because the destination function signature wasn't inferred as a tuple. Fix: typed the mock signatures explicitly (`(roomId: string, input: AddReferenceInput) => addReferenceMock(roomId, input)`).
+  - **ESLint `react/no-unescaped-entities` on `room's` apostrophe** in the empty hint: replaced with `room&apos;s`.
+
+- Known limitations:
+  - One reference per upload (no multi-file selection). F11 polish could add a multi-file queue with a per-item progress bar.
+  - The upload tab does not show the generated thumbnail preview before submit (the file is just a name + size line); F11 polish can add a local `<img>` preview using `URL.createObjectURL`.
+  - The cross-room 404 error mapper uses the generic `NOT_FOUND` message ("We couldn't find that. It may have been deleted."). The DoD mentions `403 FORBIDDEN` — the backend actually returns `404 NOT_FOUND` (per M13's session-isolation rules; 404 hides existence across sessions, which is intentional per S-05). The friendly mapper correctly catches this; F11 polish can introduce a more specific "Generation not found in this room" copy if desired.
+  - No drag-and-drop; F11 polish.
+  - The upload uses XHR directly (not the typed `apiFetch`) because `fetch` doesn't expose upload progress. The XHR path normalizes errors into `ApiError` so the rest of the codebase treats responses identically.
+
+---
+
 ### 2026-06-20 — F7 Cross-room UX
 
 - Reviewer: Project Owner (self)

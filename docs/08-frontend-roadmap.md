@@ -211,25 +211,35 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F8 — References UX
+### F8 — References UX ✅ Completed 2026-06-20
 
 **Objective**: Implement reference management.
 
 **Scope**
 
-- "Add reference" UI with three source options:
-  - **Generated**: pick from current room's generations.
-  - **Upload**: image picker (JPEG/PNG/WebP, ≤ 10 MB); client-side type/size validation before submit; upload progress.
-  - **External URL**: paste a link with caption.
-- Reference list per room.
-- Delete reference.
-- Validation surfaced from API (`UPLOAD_REJECTED`, `PROMPT_INVALID`, etc.).
-- Display uploaded references using short-TTL signed URLs from the API.
+- **Three source flows** behind one tabbed `<AddReferenceModal>`:
+  - **Generated** — dropdown of the room's `COMPLETED` generations, posts `sourceType=GENERATED` + `sourceId`. Backend rejects cross-room with `404 NOT_FOUND` (DoD).
+  - **External link** — `URL` input with `http`/`https` validation client-side; backend re-validates with `@IsUrl`. Posts `sourceType=EXTERNAL_URL` + `externalUrl`.
+  - **Upload** — `<input type="file" accept="image/jpeg,image/png,image/webp">` with client-side MIME + size (≤ 10 MB) validation BEFORE any backend call (DoD). Uses a small XHR-based helper (`src/lib/upload.ts`) so we get real upload progress via `xhr.upload.onprogress`. Posts `multipart/form-data` to `POST .../references/upload`.
+- **`<ReferenceCard>`** — single card rendering for all three source types: GENERATED → backend proxy URL for the generation's image; EXTERNAL_URL → click-through to the URL; UPLOADED → short-TTL signed `url` from the backend. Caption + meta line + delete button.
+- **Reference list** per room on `<ReferencesPage>` (deep-link `/rooms/:roomId/references`), with `<EmptyState>` for first-time visitors.
+- **Delete** with `<ConfirmDialog>` per card.
+- **Inline `<ReferencesSection>` on `<RoomDetailPage>`** — top-3 preview with link to the full page.
+- **`useReferences` + `useAddReference` + `useUploadReference` + `useDeleteReference` + `useUploadReferenceWithProgress`** hooks (one per action; the progress variant exposes live `percent` state).
+- **Validation surfaced from API**: `UPLOAD_REJECTED`, `VALIDATION_FAILED` (with `fields.mimeType` / `fields.size`), `NOT_FOUND`, `CONFLICT`. All routed through the existing `<ErrorState />` mapper.
 
-**DoD**
+**Out of Scope**
 
-- Adding a reference to a generation outside the current room fails with `403 FORBIDDEN` and a helpful message.
-- Uploading a 12 MB file fails with `400 UPLOAD_REJECTED` before any backend call.
+- Caption-required enforcement (server allows empty captions).
+- Drag-and-drop file upload.
+- Multi-file uploads (one reference per upload).
+- Generation of an `image/png` vs `image/jpeg` upload thumbnail (we trust the backend's response MIME).
+
+**DoD** ✅
+
+- **Cross-room 404 (verified end-to-end via curl)**: `POST /api/rooms/{kitchen}/references { sourceType: "GENERATED", sourceId: "<living-room-gen>" }` → `404 NOT_FOUND` with message `"Generation not found in this room."` and a trace id. The frontend surfaces this via the `<ErrorState />` mapper (`friendlyErrorMessage(NOT_FOUND)` → "We couldn't find that. It may have been deleted.").
+- **12 MB upload rejected before backend (verified via unit test)**: `<AddReferenceModal>`'s Upload tab rejects 12 MB files in `handleFileChange` with `data-testid="upload-client-error"` rendering the friendly "That's 12 MB. JPEG, PNG, or WebP. Up to 10 MB." message; submit button stays disabled. No network call is made.
+- **End-to-end Playwright walkthrough**: created an EXTERNAL_URL reference for a Kitchen room via the modal; the new card shows up in the list with the click-through link, "External link" badge, "No caption" fallback, and Delete button.
 
 ---
 
