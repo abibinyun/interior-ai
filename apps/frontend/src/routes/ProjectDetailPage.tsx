@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { getProject, type ProjectWithRelations } from '../api/projects';
 import { ErrorState } from '../components/ErrorState';
+import { ProjectCompletionCard } from '../components/ProjectCompletionCard';
 import { ProjectProgress } from '../components/ProjectProgress';
 import { RoomDashboardCard } from '../components/RoomDashboardCard';
 import { Skeleton } from '../components/Skeleton';
@@ -101,6 +102,8 @@ export function ProjectDetailPage() {
       </section>
 
       <ProjectProgress total={summary.total} approved={summary.approved} />
+
+      <ProjectCompletionCard project={p} />
 
       <section className="space-y-3">
         <div className="flex items-end justify-between">

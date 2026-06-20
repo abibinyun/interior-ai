@@ -243,22 +243,45 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F9 — Export UX
+### F9 — Export UX ✅ Completed 2026-06-20
 
 **Objective**: Implement Step 8 (Complete) and Step 9 (Export).
 
 **Scope**
 
-- "Mark House Complete" CTA, gated on all rooms approved (UI validates via API).
-- "Reopen project" action.
-- "Export Bundle" CTA on completed projects.
-- Bundle list (versions), download link per version (signed URL with TTL).
-- Bundle preview page rendering manifest from `GET /api/exports/:bundleId`.
-- Style-change warning UX (SCA-04) when project.style is changed and any room is approved.
+- **`<ProjectCompletionCard>`** on `<ProjectDetailPage>` — three states:
+  - **DRAFT / IN_PROGRESS** with not-all-approved → disabled "Mark house complete" CTA + counts ("X of N rooms approved") + helpful copy. Disabled at the UI as a courtesy; backend is the source of truth.
+  - **IN_PROGRESS** with all rooms approved → enabled "Mark house complete" CTA.
+  - **COMPLETED** → "Open exports →" primary link + "Reopen project" secondary action.
+- **`<ExportsPage>`** at `/projects/:projectId/exports` — replaces the F1 placeholder:
+  - Newest-first bundle list with `<BundleCard>` (version, size, created, "Latest" badge).
+  - "Create bundle" CTA disabled when the project is not COMPLETED, with a hint pointing to the project page.
+  - Per-create confirmation via `<ConfirmDialog>` explaining the version bump.
+  - Empty state with friendly copy + CTA.
+- **`<BundlePreviewPage>`** at `/exports/:bundleId` — renders the manifest (project + style profile + per-room file map + full files listing + short-TTL download link).
+- **SCA-04 warning** on `<StylePage>` — pre-save warning banner shows when changing the style with approved rooms ("will NOT retroactively modify approved rooms"). Post-save confirmation surfaces the `meta.styleChangeWarning: true` from the backend response.
+- **Hooks**: `useCompleteProject`, `useReopenProject`, `useExports`, `useCreateExport`, `useExportBundle`, plus a `countRoomStatuses` helper.
+- **Backend change (SCA-04 meta)**: `PUT /api/projects/:id/style` now returns a `meta: { styleChangeWarning: boolean; approvedRoomCount: number }` block per the SCA-04 contract. The frontend reads it from the mutation response.
+- **Backend bug fix (storage adapter)**: `SupabaseStorageAdapter.upload` had an image-only MIME allow-list that blocked `application/zip` exports. The adapter now trusts the caller's MIME (each resource service validates its own), so ZIP bundles upload cleanly.
 
-**DoD**
+**Out of Scope**
 
-- Completing a project and exporting produces a downloadable bundle; re-exporting produces version+1.
+- Inline ZIP preview / file browser (the manifest listing is enough for the v1 "what's in the bundle" check; deeper inspection can land in v2).
+- Per-file signed download URLs (only the bundle ZIP gets a signed URL).
+- Auto-export on completion (the user explicitly creates bundles so they can pick the moment).
+- Email / share-link delivery of bundles.
+
+**DoD** ✅
+
+- **Completing a project and exporting produces a downloadable bundle; re-exporting produces v+1** — verified end-to-end via curl:
+  - `POST /api/projects/:id/complete` (with all rooms APPROVED) → 201 with `status: COMPLETED` + `completedAt`.
+  - `POST /api/projects/:id/exports` → 201 with `v1`, `manifest` (project + style + 5 files), `downloadUrl` (15-min TTL).
+  - `POST /api/projects/:id/exports` again → 201 with `v2`; previous bundle preserved.
+  - `GET /api/projects/:id/exports` → 2 bundles listed newest-first.
+  - `GET /api/exports/:bundleId` → full manifest + fresh downloadUrl.
+- **Error paths also verified**:
+  - `POST .../complete` while a room is IN_REVIEW → `422 BUSINESS_RULE_VIOLATION` "Cannot complete: 1 room(s) are not APPROVED."
+  - `POST .../exports` while project is not COMPLETED → `400 VALIDATION_FAILED` with `fields.status: "Project status is DRAFT"`.
 
 ---
 

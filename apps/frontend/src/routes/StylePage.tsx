@@ -33,6 +33,7 @@ export function StylePage() {
 
   const [selected, setSelected] = useState<string | null>(null);
   const [notes, setNotes] = useState<string>('');
+  const [styleChanged, setStyleChanged] = useState(false);
 
   // Seed the form from the current style once it loads.
   useEffect(() => {
@@ -41,6 +42,21 @@ export function StylePage() {
       setNotes(current.data.styleNotes ?? '');
     }
   }, [current.data]);
+
+  // After a successful save, the mutation response carries the SCA-04
+  // meta block. We surface the post-save warning banner so the user
+  // sees the confirmation even after navigating back to the form.
+  useEffect(() => {
+    const data = setStyle.data;
+    if (data && data.meta.styleChangeWarning) {
+      setStyleChanged(true);
+    }
+  }, [setStyle.data]);
+
+  // Dismiss the post-save banner if the user picks a different style.
+  useEffect(() => {
+    setStyleChanged(false);
+  }, [selected]);
 
   if (!projectId) return <p className="text-stone-500">No project id in the URL.</p>;
 
@@ -78,6 +94,11 @@ export function StylePage() {
   const errorFields =
     setStyle.error instanceof ApiError && setStyle.error.fields ? setStyle.error.fields : {};
 
+  const approvedRoomCount = project.data.rooms.filter((r) => r.status === 'APPROVED').length;
+  const willWarnOnSave =
+    approvedRoomCount > 0 && selected !== null && selected !== current.data?.styleKey;
+  const postSaveWarning = styleChanged && setStyle.data?.meta.styleChangeWarning;
+
   return (
     <article className="space-y-8">
       <header className="space-y-2">
@@ -92,6 +113,18 @@ export function StylePage() {
           Pick a house-wide design language. Every room you generate will carry this style forward.
         </p>
       </header>
+
+      {postSaveWarning ? (
+        <aside
+          role="status"
+          data-testid="style-change-warning-postsave"
+          className="rounded-2xl border border-amber-300 bg-amber-50/70 p-4 text-sm text-amber-900 shadow-sm"
+        >
+          <strong className="font-semibold">Heads up.</strong> Changing project style will NOT
+          retroactively modify approved rooms. Only future generations and rooms will use the new
+          style profile.
+        </aside>
+      ) : null}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <fieldset>
@@ -149,6 +182,19 @@ export function StylePage() {
           ) : null}
         </fieldset>
 
+        {willWarnOnSave ? (
+          <aside
+            role="status"
+            data-testid="style-change-warning-presave"
+            className="rounded-2xl border border-amber-300 bg-amber-50/70 p-4 text-sm text-amber-900 shadow-sm"
+          >
+            <strong className="font-semibold">Heads up.</strong> You have{' '}
+            <span data-testid="approved-room-count">{approvedRoomCount}</span> approved room
+            {approvedRoomCount === 1 ? '' : 's'}. Changing the style does NOT retroactively
+            re-style them — only future generations will use the new style profile.
+          </aside>
+        ) : null}
+
         <TextAreaField
           label="Notes (optional)"
           name="styleNotes"
@@ -172,8 +218,13 @@ export function StylePage() {
           ) : null}
           <button
             type="submit"
-            disabled={setStyle.isPending || !selected || selected === current.data?.styleKey}
+            disabled={
+              setStyle.isPending ||
+              !selected ||
+              (selected === current.data?.styleKey && notes === (current.data?.styleNotes ?? ''))
+            }
             className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-cream-50 hover:bg-stone-700 disabled:opacity-50"
+            data-testid="style-save-button"
           >
             {setStyle.isPending ? 'Saving…' : current.data ? 'Update style' : 'Save style'}
           </button>

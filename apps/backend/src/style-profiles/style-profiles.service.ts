@@ -30,13 +30,32 @@ export class StyleProfilesService {
       throw new NotFoundError(`Unknown style key: ${dto.styleKey}`);
     }
     const entry = findStyle(dto.styleKey)!;
+    // SCA-04: capture the previous styleKey BEFORE upsert so we can
+    // detect a real change (insert or key-change). Notes-only edits
+    // do not raise the warning.
+    const previous = await this.repo.findByProjectId(projectId);
+    const previousStyleKey = previous?.styleKey ?? null;
     const profile = await this.repo.upsert(projectId, {
       styleKey: dto.styleKey,
       styleNotes: dto.styleNotes?.trim() ?? null,
       colorTendenciesJson: entry.colorTendencies as unknown as Prisma.InputJsonValue,
       materialPrefsJson: entry.materialTendencies as unknown as Prisma.InputJsonValue,
     });
-    return this.serialize(profile);
+    // SCA-02 / SCA-04: when at least one room is approved, replacing
+    // the style does NOT retroactively re-style those rooms. The
+    // frontend surfaces a warning copy from Q4 in this case.
+    const styleChanged = previousStyleKey !== profile.styleKey;
+    const approvedCount = await this.prisma.room.count({
+      where: { projectId, status: 'APPROVED' },
+    });
+    const styleChangeWarning = styleChanged && approvedCount > 0;
+    return {
+      ...this.serialize(profile),
+      meta: {
+        styleChangeWarning,
+        approvedRoomCount: approvedCount,
+      },
+    };
   }
 
   private async requireOwnedProject(projectId: string): Promise<void> {

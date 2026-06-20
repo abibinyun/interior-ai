@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { queryClient } from './lib/query-client';
 import { AppShell } from './routes/AppShell';
+import { BundlePreviewPage } from './routes/BundlePreviewPage';
 import { ExportsPage } from './routes/ExportsPage';
 import { GenerationDetailPage } from './routes/GenerationDetailPage';
 import { GenerationsPage } from './routes/GenerationsPage';
@@ -32,6 +33,7 @@ export function App() {
             <Route path="generations/:generationId" element={<GenerationDetailPage />} />
             <Route path="rooms/:roomId/references" element={<ReferencesPage />} />
             <Route path="projects/:projectId/exports" element={<ExportsPage />} />
+            <Route path="exports/:bundleId" element={<BundlePreviewPage />} />
             <Route path="styles" element={<StyleCatalogPage />} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="legacy/projects/:projectId/rooms" element={<Navigate to="/projects/:projectId/rooms" replace />} />

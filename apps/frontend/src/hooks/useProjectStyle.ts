@@ -4,6 +4,7 @@ import {
   getStyleCatalog,
   putProjectStyle,
   type ProjectStyle,
+  type ProjectStyleSetResponse,
   type PutProjectStyleInput,
   type StyleCatalogEntry,
 } from '../api/styles';
@@ -43,9 +44,12 @@ export function useProjectStyle(projectId: string | undefined) {
  */
 export function useSetProjectStyle(projectId: string) {
   const qc = useQueryClient();
-  return useMutation<ProjectStyle, Error, PutProjectStyleInput>({
+  return useMutation<ProjectStyleSetResponse, Error, PutProjectStyleInput>({
     mutationFn: (input) => putProjectStyle(projectId, input),
-    onSuccess: async () => {
+    onSuccess: async (res) => {
+      // The mutation response carries the canonical profile; seed the
+      // query cache so the next read sees it without a round-trip.
+      qc.setQueryData(projectStyleQueryKey(projectId), res);
       await qc.invalidateQueries({ queryKey: projectStyleQueryKey(projectId) });
     },
   });

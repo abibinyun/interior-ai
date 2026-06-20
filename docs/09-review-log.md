@@ -527,6 +527,70 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F9 Export UX
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `<ProjectCompletionCard>` + `<BundleCard>` + `<ExportsPage>` (replaces the F1 placeholder at `/projects/:projectId/exports`) + new `<BundlePreviewPage>` at `/exports/:bundleId` + SCA-04 warning banner on `<StylePage>`. New module `src/hooks/useProjectLifecycle.ts` (`useCompleteProject`, `useReopenProject`, `countRoomStatuses` helper) and `src/hooks/useExports.ts` (`useExports`, `useCreateExport`, `useExportBundle`). Backend: `PUT /api/projects/:id/style` now returns `meta: { styleChangeWarning, approvedRoomCount }` per the SCA-04 contract. Backend bug fix: `SupabaseStorageAdapter.upload` no longer rejects non-image content types (the previous image-only MIME check was blocking `application/zip` exports). 3 new backend tests in `projects.e2e-spec.ts > Style-change warning (SCA-04 meta)`. 14 new frontend tests across `useProjectLifecycle.test.ts`, `BundleCard.test.tsx`, `ProjectCompletionCard.test.tsx`. Footer bumped to `v0.9 — F1–F9`.
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run build` (backend + frontend) → clean (Vite 304 KB / 87 KB gzip)
+  - `npm run test:frontend` → **124/124 pass** (was 110 + 14 new)
+  - `npm run test:backend` → **220/221 pass** (was 217 + 3 new SCA-04, 1 pre-existing M16 observability flake — same network-dependent `/api/health/ready` 503 documented in F2 review log)
+  - `docker compose restart backend + frontend` → live
+  - **End-to-end curl smoke**: created a JAPANDI-styled project with a LIVING_ROOM, generated, approved, completed the project, exported twice. The first export returned `v1` with a 5-file manifest (project-summary.json, style-profile.json, approved-images/living-room.jpg, prompts/living-room.json, room-notes/living-room.md) and a 15-minute downloadUrl. The second export returned `v2`; `GET .../exports` listed both newest-first.
+  - **Error paths**:
+    - `POST .../complete` while a room is IN_REVIEW → `422 BUSINESS_RULE_VIOLATION` "Cannot complete: 1 room(s) are not APPROVED."
+    - `POST .../exports` while project is not COMPLETED → `400 VALIDATION_FAILED` with `fields.status: "Project status is DRAFT"`.
+  - **Playwright walkthrough**: visited `/projects/{verification-house}/exports` (incomplete project) → renders disabled "Create first bundle" CTA + helpful hint. Visited `/projects/{verification-house}` → renders the new `<ProjectCompletionCard>` showing "1 of 2 rooms approved" + disabled "Mark house complete" CTA.
+
+- F9 deliverables:
+  - **`<ProjectCompletionCard>`** — three-state card on the project dashboard. Disabled state shows the count + helpful copy + disabled CTA. All-approved state shows the same count + enabled "Mark house complete" CTA. Completed state flips to "Open exports →" + "Reopen project" buttons. Errors from `POST .../complete` and `POST .../reopen` surface via `<ErrorState />`.
+  - **`<BundleCard>`** — single bundle row: version, "Latest" badge (when `isLatest`), formatted size + date, "Preview →" link to `/exports/:bundleId`.
+  - **`<ExportsPage>`** — newest-first list + create CTA + empty state. The CTA's label dynamically shows "Create first bundle" vs "Create v{n+1}" so the user knows the version they're about to mint. A `<ConfirmDialog>` explains the version bump before submit.
+  - **`<BundlePreviewPage>`** — fetches the bundle via `GET /api/exports/:bundleId`. Renders the manifest's project / style / per-room file map (approved image + prompt + notes per room) and a full files listing with sizes. Surfaces the short-TTL download link with expiry.
+  - **SCA-04 warning on `<StylePage>`** — pre-save: when the user picks a different style AND any room is APPROVED, a yellow banner shows the warning copy ("will NOT retroactively modify approved rooms") with the approved room count. Post-save: the same banner stays visible if the backend response carries `meta.styleChangeWarning: true`. Cleared when the user picks a different style.
+  - **Hooks**:
+    - `useCompleteProject(projectId)` — mutation; invalidates project + projects list + rooms on success.
+    - `useReopenProject(projectId)` — mutation; invalidates project + projects list on success.
+    - `useExports(projectId)` — query for the bundle list.
+    - `useCreateExport(projectId)` — mutation; invalidates the list and seeds the bundle query cache for instant navigation to `/exports/:bundleId`.
+    - `useExportBundle(bundleId)` — query for the bundle detail (manifest + fresh downloadUrl).
+    - `countRoomStatuses(project)` — pure helper returning `{ total, approved }` for the card.
+  - **SCA-04 backend change** (`apps/backend/src/style-profiles/style-profiles.service.ts`):
+    - Fetches the previous profile BEFORE `upsert` so the comparison is meaningful.
+    - Returns `{ ...profile, meta: { styleChangeWarning: previousStyleKey !== profile.styleKey && approvedCount > 0, approvedRoomCount } }`.
+    - 3 new e2e tests cover: key change with approved room → true; notes-only change with approved room → false; key change with no approved rooms → false.
+  - **Storage adapter bug fix** (`apps/backend/src/storage/supabase-storage.adapter.ts`):
+    - Removed the `ALLOWED_IMAGE_MIME_TYPES` gate. The adapter now only enforces "non-empty content-type under 200 chars" + the existing size cap. Per-resource services (ReferencesService validates SG-06, ExportsService uses application/zip, etc.) own their own MIME validation.
+    - **Lesson recorded**: M14's tests use `FakeStorageAdapter` which is permissive, so this bug only surfaced in production. The e2e suite should add a SupabaseStorageAdapter integration test for ZIP uploads in a future hardening pass.
+
+- 14 new frontend tests:
+  - `useProjectLifecycle.test.ts` (4) — `countRoomStatuses` returns zeros for undefined, counts only APPROVED, counts total correctly when nothing is approved, 0 of 0 for zero-room project.
+  - `BundleCard.test.tsx` (5) — version + size + date render; Latest badge appears with `isLatest`; omitted otherwise; Preview link when `previewHref` provided; omitted otherwise.
+  - `ProjectCompletionCard.test.tsx` (5) — disabled CTA when not all approved; enabled CTA when all approved; click → `completeProject` called; COMPLETED shows "Open exports →" + "Reopen project" (no Mark Complete); click Reopen → `reopenProject` called.
+
+- 3 new backend tests (`projects.e2e-spec.ts > Style-change warning (SCA-04 meta)`):
+  - Key change + approved room → `meta.styleChangeWarning: true, approvedRoomCount: 1`.
+  - Notes-only change + approved room → `meta.styleChangeWarning: false, approvedRoomCount: 1`.
+  - Key change + no approved rooms → `meta.styleChangeWarning: false, approvedRoomCount: 0`.
+
+- Bugs found and fixed during F9 verification (lessons recorded):
+  - **`humanizeRoomType` imported from `RoomDashboardCard`** in `BundlePreviewPage.tsx` failed typecheck — the helper is inlined as a private function (per react-refresh/only-export-components). Fix: inlined the helper in `BundlePreviewPage.tsx` too.
+  - **`BundleCard.test.tsx` size regex** `/5\s*MB/` failed because `formatBytes` returns "5.0 MB" for 5,242,880 bytes. Fix: regex widened to `/5\.0\s*MB|5\s*MB/`.
+  - **`userEvent` / `vi` unused imports** in `BundleCard.test.tsx` after I removed the click test (the only click test was implicit and unnecessary). Fix: removed the imports.
+  - **Production-blocking bug found via curl smoke**: `SupabaseStorageAdapter.upload` rejected the export's `application/zip` with `UPLOAD_REJECTED: Unsupported content-type: application/zip`. Root cause: the adapter enforced an image-only MIME whitelist that exports can't satisfy. Fix: removed the whitelist, kept the size cap + a sanity check on the content-type string. Per-resource services validate MIME themselves. This is the kind of bug that the `FakeStorageAdapter` couldn't catch — see lesson above.
+
+- Known limitations:
+  - The bundle preview shows the file listing but not inline thumbnails (the approved images are bundled as JPEG files inside the ZIP; F11 polish can add a `?preview=1` query that streams the file).
+  - "Mark house complete" is gated client-side on the optimistic room statuses from the project query. If the user has another tab that's currently re-opening an approved room, the request will still 422; we surface that via `<ErrorState />` so the user can re-read.
+  - The SCA-04 warning is a banner, not a hard confirmation modal. The user can still hit "Update style" and accept the consequence. F10 (Failure Surfaces) could add a typed-confirmation flow, but the current banner is consistent with the Q4 product decision.
+  - The `meta.styleChangeWarning` is read from the PUT response, but `useProjectStyle` (the GET) does NOT include the meta block. So a refresh after saving won't re-show the warning. Acceptable — the warning is for the moment of change, not a persistent flag.
+
+---
+
 ### 2026-06-20 — F8 References UX
 
 - Reviewer: Project Owner (self)

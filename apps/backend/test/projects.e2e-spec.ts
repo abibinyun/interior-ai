@@ -365,4 +365,90 @@ describe('M4 — Projects + Style', () => {
       }
     });
   });
+
+  describe('Style-change warning (SCA-04 meta)', () => {
+    let sessionId: string;
+    beforeAll(async () => {
+      sessionId = await createSession(app);
+    });
+    afterAll(async () => {
+      await cleanup(sessionId);
+    });
+
+    async function makeProjectWithApprovedRoom(
+      cookie: string,
+      name: string,
+      styleKey: string,
+    ): Promise<{ projectId: string; roomId: string }> {
+      const create = await request(app.getHttpServer())
+        .post('/api/projects')
+        .set('Cookie', cookie)
+        .send({ name });
+      const projectId = create.body.id as string;
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/style`)
+        .set('Cookie', cookie)
+        .send({ styleKey })
+        .expect(200);
+      const room = await request(app.getHttpServer())
+        .post(`/api/projects/${projectId}/rooms`)
+        .set('Cookie', cookie)
+        .send({ roomType: 'LIVING_ROOM' });
+      const roomId = room.body.id as string;
+      // Force the room into APPROVED + an approved generation so the
+      // count query returns 1. We bypass the AI pipeline here (it's
+      // covered by M12 tests).
+      await prisma.room.update({
+        where: { id: roomId },
+        data: { status: 'APPROVED', approvedGenerationId: '00000000-0000-0000-0000-000000000001' },
+      });
+      return { projectId, roomId };
+    }
+
+    it('returns meta.styleChangeWarning=true when style key changes and a room is APPROVED', async () => {
+      const cookie = `sid=${sessionId}`;
+      const { projectId } = await makeProjectWithApprovedRoom(cookie, 'SCA04-A', 'JAPANDI');
+      const res = await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/style`)
+        .set('Cookie', cookie)
+        .send({ styleKey: 'SCANDINAVIAN' });
+      expect(res.status).toBe(200);
+      expect(res.body.meta).toEqual({
+        styleChangeWarning: true,
+        approvedRoomCount: 1,
+      });
+    });
+
+    it('returns meta.styleChangeWarning=false when only notes change and a room is APPROVED', async () => {
+      const cookie = `sid=${sessionId}`;
+      const { projectId } = await makeProjectWithApprovedRoom(cookie, 'SCA04-B', 'JAPANDI');
+      const res = await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/style`)
+        .set('Cookie', cookie)
+        .send({ styleKey: 'JAPANDI', styleNotes: 'updated notes' });
+      expect(res.status).toBe(200);
+      expect(res.body.meta.styleChangeWarning).toBe(false);
+      expect(res.body.meta.approvedRoomCount).toBe(1);
+    });
+
+    it('returns meta.styleChangeWarning=false when no rooms are approved', async () => {
+      const cookie = `sid=${sessionId}`;
+      const create = await request(app.getHttpServer())
+        .post('/api/projects')
+        .set('Cookie', cookie)
+        .send({ name: 'SCA04-C' });
+      const projectId = create.body.id as string;
+      await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/style`)
+        .set('Cookie', cookie)
+        .send({ styleKey: 'JAPANDI' });
+      const res = await request(app.getHttpServer())
+        .put(`/api/projects/${projectId}/style`)
+        .set('Cookie', cookie)
+        .send({ styleKey: 'SCANDINAVIAN' });
+      expect(res.status).toBe(200);
+      expect(res.body.meta.styleChangeWarning).toBe(false);
+      expect(res.body.meta.approvedRoomCount).toBe(0);
+    });
+  });
 });

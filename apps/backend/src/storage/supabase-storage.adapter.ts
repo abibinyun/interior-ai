@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  ALLOWED_IMAGE_MIME_TYPES,
   MAX_UPLOAD_BYTES,
   SignedUrlResult,
   StorageAdapter,
@@ -35,8 +34,19 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     if (request.body.length > MAX_UPLOAD_BYTES) {
       throw this.makeError('UPLOAD_REJECTED', `Upload exceeds maximum size of ${MAX_UPLOAD_BYTES} bytes`, request.key, undefined);
     }
-    if (!(ALLOWED_IMAGE_MIME_TYPES as readonly string[]).includes(request.contentType)) {
-      throw this.makeError('UPLOAD_REJECTED', `Unsupported content-type: ${request.contentType}`, request.key, undefined);
+    // MIME validation is the responsibility of the caller:
+    //   - ReferencesService validates image/jpeg|png|webp + size (rule SG-06)
+    //   - GenerationsService validates the AI provider's response MIME
+    //   - ExportsService uses application/zip for the bundle
+    // The storage layer is intentionally permissive — Supabase's bucket
+    // accepts arbitrary content types as long as we send the right one.
+    if (!request.contentType || request.contentType.length > 200) {
+      throw this.makeError(
+        'UPLOAD_REJECTED',
+        `Invalid content-type: ${JSON.stringify(request.contentType)}`,
+        request.key,
+        undefined,
+      );
     }
 
     const url = `${this.supabaseUrl}/storage/v1/object/${this.bucket}/${request.key}`;

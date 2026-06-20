@@ -17,6 +17,23 @@ export interface ProjectStyle {
   updatedAt: string;
 }
 
+/**
+ * SCA-04 meta block. Returned alongside the style profile on
+ * `PUT /api/projects/:id/style`. `styleChangeWarning` is `true`
+ * when the style key was just changed AND at least one room in the
+ * project is APPROVED — the existing approved rooms do NOT
+ * retroactively re-style (rule SCA-02). The frontend surfaces the
+ * warning copy from Q4 in this case.
+ */
+export interface ProjectStyleMeta {
+  styleChangeWarning: boolean;
+  approvedRoomCount: number;
+}
+
+export interface ProjectStyleSetResponse extends ProjectStyle {
+  meta: ProjectStyleMeta;
+}
+
 export function getStyleCatalog(): Promise<{ items: StyleCatalogEntry[] }> {
   return apiFetch<{ items: StyleCatalogEntry[] }>('/styles');
 }
@@ -39,8 +56,8 @@ export interface PutProjectStyleInput {
 export function putProjectStyle(
   projectId: string,
   input: PutProjectStyleInput,
-): Promise<ProjectStyle> {
-  return apiFetch<ProjectStyle>(`/projects/${projectId}/style`, {
+): Promise<ProjectStyleSetResponse> {
+  return apiFetch<ProjectStyleSetResponse>(`/projects/${projectId}/style`, {
     method: 'PUT',
     body: input,
   });
