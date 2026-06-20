@@ -104,7 +104,7 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F3 — Project Flow
+### F3 — Project Flow ✅ Completed 2026-06-20
 
 **Objective**: Implement Steps 1, 2, 3 of the user journey on the frontend.
 

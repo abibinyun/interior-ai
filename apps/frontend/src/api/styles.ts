@@ -1,9 +1,11 @@
 import { apiFetch } from './client';
 
 export interface StyleCatalogEntry {
-  styleKey: string;
+  key: string;
   name: string;
   description: string;
+  colorTendencies: string[];
+  materialTendencies: string[];
 }
 
 export interface ProjectStyle {

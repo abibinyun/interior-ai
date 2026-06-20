@@ -30,12 +30,8 @@ export function AppShell() {
           </Link>
           <nav aria-label="Primary" className="flex items-center gap-6 text-sm">
             <NavItem to="/projects">Projects</NavItem>
-            <NavItem to="/styles" disabled>
-              Style catalog
-            </NavItem>
-            <NavItem to="/settings" disabled>
-              Settings
-            </NavItem>
+            <NavItem to="/styles">Style catalog</NavItem>
+            <NavItem to="/settings">Settings</NavItem>
             <span
               className="hidden text-xs text-stone-400 sm:inline"
               data-testid="session-id"

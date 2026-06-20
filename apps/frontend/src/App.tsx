@@ -12,6 +12,8 @@ import { ProjectsPage } from './routes/ProjectsPage';
 import { ReferencesPage } from './routes/ReferencesPage';
 import { RoomDetailPage } from './routes/RoomDetailPage';
 import { RoomsPage } from './routes/RoomsPage';
+import { SettingsPage } from './routes/SettingsPage';
+import { StyleCatalogPage } from './routes/StyleCatalogPage';
 import { StylePage } from './routes/StylePage';
 
 export function App() {
@@ -30,6 +32,8 @@ export function App() {
             <Route path="generations/:generationId" element={<GenerationDetailPage />} />
             <Route path="rooms/:roomId/references" element={<ReferencesPage />} />
             <Route path="projects/:projectId/exports" element={<ExportsPage />} />
+            <Route path="styles" element={<StyleCatalogPage />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="legacy/projects/:projectId/rooms" element={<Navigate to="/projects/:projectId/rooms" replace />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>

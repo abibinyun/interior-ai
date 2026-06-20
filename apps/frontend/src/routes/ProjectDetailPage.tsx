@@ -6,11 +6,11 @@ import { Skeleton } from '../components/Skeleton';
 import { formatDate } from '../lib/format';
 
 /**
- * F2 Project detail page (read-only).
+ * F3 Project detail page.
  *
- * Pulls project + style + rooms via `GET /api/projects/:id`. The page
- * is a placeholder for the full editor (F3–F9 land create/rename,
- * style editor, room editor, etc.).
+ * Pulls project + style + rooms via `GET /api/projects/:id`. Now
+ * with links into the Style + Rooms editors (F3 deliverable) and
+ * action chips for the lifecycle transitions.
  */
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -65,7 +65,15 @@ export function ProjectDetailPage() {
       </header>
 
       <section className="placeholder-card space-y-3">
-        <h2 className="font-display text-xl font-semibold">Style</h2>
+        <div className="flex items-end justify-between gap-3">
+          <h2 className="font-display text-xl font-semibold">Style</h2>
+          <Link
+            to={`/projects/${p.id}/style`}
+            className="text-sm font-medium text-forest-500 hover:text-forest-700"
+          >
+            {p.styleProfile ? 'Edit' : 'Pick a style →'}
+          </Link>
+        </div>
         {p.styleProfile ? (
           <div className="flex items-baseline gap-3">
             <span className="font-display text-lg">{p.styleProfile.styleKey}</span>
@@ -76,21 +84,22 @@ export function ProjectDetailPage() {
             )}
           </div>
         ) : (
-          <p className="text-sm italic text-stone-400">
-            No style set yet. The style editor lands in F3.
-          </p>
+          <p className="text-sm italic text-stone-400">No style set yet.</p>
         )}
       </section>
 
       <section className="space-y-3">
         <div className="flex items-end justify-between">
           <h2 className="font-display text-xl font-semibold">Rooms</h2>
-          <span className="text-xs text-stone-400">{p.rooms.length} total</span>
+          <Link
+            to={`/projects/${p.id}/rooms`}
+            className="text-sm font-medium text-forest-500 hover:text-forest-700"
+          >
+            {p.rooms.length === 0 ? 'Add your first room →' : `Manage (${p.rooms.length})`}
+          </Link>
         </div>
         {p.rooms.length === 0 ? (
-          <p className="text-sm italic text-stone-400">
-            No rooms yet. Adding rooms lands in F3.
-          </p>
+          <p className="text-sm italic text-stone-400">No rooms yet.</p>
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {p.rooms.map((r) => (

@@ -1,22 +1,26 @@
+import { useState } from 'react';
+import { CreateProjectModal } from '../components/CreateProjectModal';
 import { ErrorState } from '../components/ErrorState';
 import { ProjectCard } from '../components/ProjectCard';
 import { SkeletonList } from '../components/Skeleton';
 import { useProjects } from '../hooks/useProjects';
 
 /**
- * F2 Projects page.
+ * F3 Projects page.
  *
  * States:
  *  - pending  → skeleton list (3 placeholder rows)
  *  - error    → friendly error card with trace id + retry
- *  - empty    → first-time visitor empty state
+ *  - empty    → first-time visitor empty state with active CTA
  *  - data     → grid of `ProjectCard`s
  *
- * No creation flow yet (F3). The "Create Project" button is present
- * but inert for F2 (the spec calls for it to be visible).
+ * The "+ Create project" button (in the header and in the empty
+ * state) opens a modal that posts to `POST /api/projects` and routes
+ * to the new project's detail page on success.
  */
 export function ProjectsPage() {
   const query = useProjects();
+  const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <section className="space-y-8">
@@ -29,10 +33,9 @@ export function ProjectsPage() {
         </div>
         <button
           type="button"
-          disabled
-          aria-disabled="true"
-          className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-cream-50 opacity-60"
-          title="Create flow lands in F3"
+          onClick={() => setCreateOpen(true)}
+          className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-cream-50 hover:bg-stone-700"
+          data-testid="create-project-button"
         >
           + Create project
         </button>
@@ -43,7 +46,7 @@ export function ProjectsPage() {
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => query.refetch()} />
       ) : query.data.items.length === 0 ? (
-        <EmptyProjectsHint />
+        <EmptyProjectsHint onCreate={() => setCreateOpen(true)} />
       ) : (
         <ul
           className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
@@ -57,11 +60,13 @@ export function ProjectsPage() {
           ))}
         </ul>
       )}
+
+      <CreateProjectModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </section>
   );
 }
 
-function EmptyProjectsHint() {
+function EmptyProjectsHint({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="placeholder-card mx-auto max-w-xl space-y-4 text-center">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cream-100 font-display text-2xl text-stone-700">
@@ -76,14 +81,11 @@ function EmptyProjectsHint() {
       </p>
       <button
         type="button"
-        disabled
-        aria-disabled="true"
-        className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-cream-50 opacity-60"
-        title="Create flow lands in F3"
+        onClick={onCreate}
+        className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-cream-50 hover:bg-stone-700"
       >
         + Create your first project
       </button>
-      <p className="text-xs text-stone-400">The Create button activates in milestone F3.</p>
     </div>
   );
 }

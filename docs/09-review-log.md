@@ -492,6 +492,60 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F3 Project Flow
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: real `ProjectsPage` (create flow wired), `CreateProjectModal`, `StylePage` (catalog grid + editor + notes), `RoomsPage` (list + add modal), `StyleCatalogPage`, `SettingsPage`, shared `<Modal>` + `<FormField>` primitives, `RoomStatusChip`, four new hooks (`useCreateProject`, `useProject`, `useProjectStyle/useSetProjectStyle/useStyleCatalog`, `useProjectRooms/useRoom/useCreateRoom`), 14 new frontend tests, polyfill for `HTMLDialogElement.showModal` in test setup.
+
+- Verification:
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors
+  - `npm run test --workspace=@interior/frontend` → **49/49 pass** (35 F1+F2 + 14 new F3)
+  - `npm run build --workspace=@interior/frontend` → Vite bundle (243 KB JS, gzip 75 KB; 17 KB CSS, gzip 4 KB)
+  - **End-to-end smoke** through the running frontend container:
+    - `GET /api/session` → 200 with `Set-Cookie: sid=…`
+    - `GET /api/projects` → `{items: []}`
+    - `GET /api/styles` → 8 catalog entries (JAPANDI, SCANDINAVIAN, …)
+    - `POST /api/projects {"name":"F3 Smoke Test"}` → 201 with `{id, name, status: DRAFT, …}`
+    - `POST /api/projects {"name":""}` → 400 with `{error:{code:'VALIDATION_FAILED', fields:{name:'…'}}}`
+
+- F3 deliverables:
+  - **`ProjectsPage` create flow** — the inert F2 "Create project" button now opens `<CreateProjectModal>`. The modal posts to `POST /api/projects` via `useCreateProject`. On success it invalidates `PROJECTS_QUERY_KEY`, resets state, and navigates to the new project's detail page (`/projects/:id`).
+  - **`<CreateProjectModal>`** — accessible `<dialog>` with native focus trap + escape-to-close (via the `<Modal>` primitive). Two fields (name + description). Per-field errors render via `error.fields` map from the backend's standardized envelope (M15). The button is disabled when name is empty or the mutation is pending. Top-level errors (e.g. CONFLICT for duplicate names) render below the form.
+  - **`<Modal>` primitive** — wraps native `<dialog>`. `open` + `onClose` props. Uses `useEffect` to call `dialog.showModal()` / `dialog.close()` on prop changes. The native cancel event (Escape) is forwarded as `onClose`. Optional `footer` slot.
+  - **`<FormField>` family** — `<TextField>`, `<TextAreaField>`, `<SelectField>`. All accept `label`, `name`, `error`, `helper`, `required`. Errors render in place of the helper; `aria-invalid` + `aria-describedby` wired for screen readers.
+  - **`<RoomStatusChip>`** — color-coded pill for the four `RoomStatus` values (BRIEF_DRAFT / IN_REVIEW / APPROVED / GENERATING).
+  - **`StylePage` (real)** — three TanStack Query loads in parallel (project, style, catalog). The catalog renders as a radio-group grid of style cards (8 styles). Picking one and hitting "Save style" calls `PUT /api/projects/:id/style`. Errors render per-field + top-level. The "Update style" button is disabled until the selection or notes diverge from the saved value.
+  - **`RoomsPage` (real)** — lists rooms with `<RoomStatusChip>` and humanized type names (LIVING_ROOM → "Living Room"). Add Room opens a `<Modal>` with a `<SelectField>` filtered to room types not yet in the project. Empty state for projects with no rooms. Add button disabled when all 6 types are taken.
+  - **`StyleCatalogPage`** — browseable grid of the 8 curated styles with color-tendency chips. Linked from the top nav.
+  - **`SettingsPage`** — shows the full session id (no login, no email; the session id is the only identifier).
+  - **Hooks**:
+    - `useProject(projectId)` — `useQuery` over `getProject(id)`.
+    - `useCreateProject({ onSuccess })` — `useMutation` over `createProject()`, invalidates projects cache on success.
+    - `useStyleCatalog()` — long-staleTime query (catalog rarely changes).
+    - `useProjectStyle(projectId)` — query that returns `null` when no style is set.
+    - `useSetProjectStyle(projectId)` — `useMutation` over `putProjectStyle()`, invalidates project style cache on success.
+    - `useProjectRooms(projectId)` / `useRoom(roomId)` — list / detail queries.
+    - `useCreateRoom(projectId)` — `useMutation` that invalidates the project's rooms list and the parent projects cache (so the detail page re-counts rooms).
+  - **14 new tests**:
+    - `Modal.test.tsx` (4) — title + description rendering, footer slot, close-on-X-click, heading level.
+    - `FormField.test.tsx` (5) — label/helper rendering, required asterisk, error replaces helper, onChange firing, textarea rows + error.
+    - `RoomStatusChip.test.tsx` (1) — `it.each` over all four RoomStatus values → friendly labels.
+    - Plus the `<App/>` route table now includes `/styles` and `/settings`.
+
+- Bugs found and fixed during F3 verification (lessons recorded):
+  - **`RoomType as _RT; void _RT;` placeholder import**: a leftover from a refactor that confused the TS compiler (`_RT` was a type used as a value). Fix: removed.
+  - **`Modal` test threw `dialog.showModal is not a function`**: JSDom doesn't implement the HTMLDialogElement methods. Fix: polyfill `showModal`/`close` on `HTMLDialogElement.prototype` in `test/setup.ts` (no-op in real browsers).
+  - **Frontend `StyleCatalogEntry` had `styleKey` field, backend sends `key`**: the API types drifted from the actual backend response. Fix: updated the frontend type to match (`key`, `name`, `description`, `colorTendencies`, `materialTendencies`). Verified by curling `GET /api/styles` through the frontend container.
+
+- Known limitations:
+  - No real-time UI feedback for the consistency anchor (M11). The style notes are saved; the anchor visibility on cross-room generations is server-driven — F7 will surface it.
+  - The Style editor's "Save style" button is disabled when the selection matches the saved value, even if only `styleNotes` changed. Minor polish; F11 can address.
+  - The Add Room modal blocks the user from adding a second room of the same type (per backend R-03 unique constraint); this is the intended UX.
+
+---
+
 ### 2026-06-20 — F2 App Shell
 
 - Reviewer: Project Owner (self)
