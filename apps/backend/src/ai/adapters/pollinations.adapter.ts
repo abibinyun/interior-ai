@@ -3,7 +3,19 @@ import { ConfigService } from '@nestjs/config';
 import { AiProviderAdapter, GenerationRequest, GenerationResult, ProviderError, ProviderHealth } from './ai-provider.adapter';
 
 export interface HttpFetcher {
-  fetch(url: string, init: { method: string; headers: Record<string, string>; body?: string; signal: AbortSignal; timeoutMs: number }): Promise<{
+  fetch(
+    url: string,
+    init: {
+      method: string;
+      headers: Record<string, string>;
+      // BodyInit covers string | Uint8Array | FormData | etc. We
+      // declare the shape loosely here because undici's types are
+      // stricter than ours — and we accept Buffer for binary uploads.
+      body?: string | Uint8Array | Buffer;
+      signal: AbortSignal;
+      timeoutMs: number;
+    },
+  ): Promise<{
     status: number;
     headers: Record<string, string>;
     body: () => Promise<Buffer>;

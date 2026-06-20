@@ -1,5 +1,24 @@
 import { apiFetch } from './client';
 
+/**
+ * Build the URL the frontend uses to load a generation's rendered
+ * image. We always proxy through the backend
+ * (`/api/images/generations/:id`) instead of using the signed
+ * Supabase URL directly because Chrome's Opaque Response Blocking
+ * (ORB) refuses to render cross-origin images unless the response
+ * carries `Cross-Origin-Resource-Policy: cross-origin` or a
+ * permissive CORS header. The backend proxy sets that header AND
+ * serves the bytes same-origin (via the nginx reverse proxy), so
+ * the image loads reliably in every browser.
+ *
+ * `imageUrl` is still surfaced on the type for backward compatibility
+ * with anything that previously rendered the public URL directly.
+ */
+export function getGenerationImageUrl(generation: Pick<Generation, 'id' | 'status'>): string | null {
+  if (generation.status !== 'COMPLETED') return null;
+  return `/api/images/generations/${generation.id}`;
+}
+
 export type GenerationStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 export type GenerationErrorCode =
   | 'PROVIDER_TIMEOUT'
@@ -16,7 +35,19 @@ export interface Generation {
   parentGenerationId: string | null;
   prompt: string;
   negativePrompt: string | null;
+  /**
+   * Public URL to the rendered image. May be null if the storage
+   * bucket isn't public. The frontend prefers `signedImageUrl` when
+   * available.
+   */
   imageUrl: string | null;
+  /**
+   * Short-lived signed URL (default 15 min). Always preferred over
+   * `imageUrl` when set, since it works regardless of bucket
+   * visibility. Generated server-side for COMPLETED generations.
+   */
+  signedImageUrl: string | null;
+  signedImageUrlExpiresAt: string | null;
   storageObjectKey: string | null;
   status: GenerationStatus;
   errorCode: GenerationErrorCode;

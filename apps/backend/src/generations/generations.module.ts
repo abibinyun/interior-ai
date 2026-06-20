@@ -8,6 +8,7 @@ import { StorageModule } from '../storage/storage.module';
 import { AnchorBuilder } from './anchor-builder';
 import { GenerationsController } from './generations.controller';
 import { GenerationsLineageController } from './generations-lineage.controller';
+import { ImagesController } from './images.controller';
 import { GenerationsRepository } from './generations.repository';
 import { GenerationsService } from './generations.service';
 import { PipelineOrchestrator } from './pipeline-orchestrator';
@@ -15,7 +16,7 @@ import { PromptComposer } from './prompt-composer';
 
 @Module({
   imports: [PrismaModule, AiModule, StorageModule],
-  controllers: [GenerationsController, GenerationsLineageController],
+  controllers: [GenerationsController, GenerationsLineageController, ImagesController],
   providers: [
     AnchorBuilder,
     GenerationsRepository,

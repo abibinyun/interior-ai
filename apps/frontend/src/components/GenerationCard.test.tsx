@@ -15,6 +15,8 @@ function makeGen(overrides: Partial<Generation> = {}): Generation {
     prompt: 'A living room with a sectional and warm wood.',
     negativePrompt: null,
     imageUrl: 'https://fake.storage/living.png',
+    signedImageUrl: 'https://fake.storage/signed/living.png',
+    signedImageUrlExpiresAt: '2026-06-20T13:00:00.000Z',
     storageObjectKey: 'projects/p1/rooms/r1/generations/g1.png',
     status: 'COMPLETED',
     errorCode: null,

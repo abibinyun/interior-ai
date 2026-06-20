@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Generation } from '../api/generations';
+import { getGenerationImageUrl } from '../api/generations';
 import { GENERATION_STATUS_LABEL, generationErrorTitle } from './generation-status';
 
 export interface GenerationCardProps {
@@ -25,6 +27,10 @@ export interface GenerationCardProps {
  *  - isApproved → green "Approved" ribbon + no approve button
  */
 export function GenerationCard({ generation, isApproved, onApprove, approving, refineHref }: GenerationCardProps) {
+  const [imageBroken, setImageBroken] = useState(false);
+  const imageUrl = getGenerationImageUrl(generation);
+  const showImage = Boolean(imageUrl) && !imageBroken;
+
   if (generation.status === 'FAILED') {
     return (
       <article
@@ -56,16 +62,19 @@ export function GenerationCard({ generation, isApproved, onApprove, approving, r
         }`}
       >
         <div className="relative aspect-[4/3] overflow-hidden bg-stone-100">
-          {generation.imageUrl ? (
+          {showImage ? (
             <img
-              src={generation.imageUrl}
+              src={imageUrl ?? ''}
               alt={`Generation ${generation.optionIndex}`}
               className="h-full w-full object-cover"
               loading="lazy"
+              onError={() => setImageBroken(true)}
             />
           ) : (
-            <div className="flex h-full items-center justify-center text-sm text-stone-400">
-              No image
+            <div className="flex h-full items-center justify-center p-3 text-center text-sm text-stone-400">
+              {generation.status === 'COMPLETED' && imageBroken
+                ? 'Image could not be loaded'
+                : 'No image'}
             </div>
           )}
           {isApproved ? (

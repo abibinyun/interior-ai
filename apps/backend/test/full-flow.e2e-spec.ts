@@ -262,6 +262,9 @@ describe('Full Vertical-Slice Backend Flow', () => {
         expect(gen.status).toBe('COMPLETED');
         expect(gen.imageUrl).toMatch(/^https:\/\/fake\.storage\//);
         expect(gen.storageObjectKey).toMatch(/^test\/projects\//);
+        // F18: signed URL is generated for COMPLETED generations.
+        expect(gen.signedImageUrl).toMatch(/^https:\/\/fake\.storage\/signed\//);
+        expect(gen.signedImageUrlExpiresAt).toBeTruthy();
       }
 
       // ───────────────────────────────────────────────────────────────

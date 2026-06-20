@@ -6,6 +6,7 @@ import { BriefEditor } from '../components/BriefEditor';
 import { Skeleton } from '../components/Skeleton';
 import { useRoom } from '../hooks/useRoomBrief';
 import { useGenerationsByRoom, useReopenRoom } from '../hooks/useGenerations';
+import { getGenerationImageUrl } from '../api/generations';
 
 /**
  * F4 Room detail page.
@@ -115,18 +116,21 @@ export function RoomDetailPage() {
                 className="rounded-2xl border border-stone-100 bg-white p-3 shadow-sm"
               >
                 <div className="aspect-[4/3] overflow-hidden rounded-lg bg-stone-100">
-                  {g.imageUrl ? (
-                    <img
-                      src={g.imageUrl}
-                      alt={`Option ${g.optionIndex}`}
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-stone-400">
-                      {g.status}
-                    </div>
-                  )}
+                  {(() => {
+                    const url = getGenerationImageUrl(g);
+                    return url ? (
+                      <img
+                        src={url}
+                        alt={`Option ${g.optionIndex}`}
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-stone-400">
+                        {g.status}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="mt-2 flex items-center justify-between text-xs text-stone-500">
                   <span>Option {g.optionIndex}</span>

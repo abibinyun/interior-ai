@@ -492,6 +492,39 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — Fix: generation images not loading in browser (ORB)
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/backend/src/storage/supabase-storage.adapter.ts` (upload sends raw bytes), `apps/backend/src/ai/adapters/{pollinations,fetch-http}.fetcher.ts` (HttpFetcher type accepts Buffer bodies), `apps/backend/src/generations/images.controller.ts` (new `GET /api/images/generations/:id` proxy with `Cross-Origin-Resource-Policy: same-origin` + auto-decoding for legacy base64-encoded uploads), `apps/backend/src/generations/generations.module.ts` (registered `ImagesController`), `apps/backend/src/generations/generations.service.ts` (serialize is async + adds `signedImageUrl` / `signedImageUrlExpiresAt`), frontend `Generation` type + `getGenerationImageUrl()` helper, `<GenerationCard>` uses proxy URL with `onError` fallback, `RoomDetailPage` thumbnail updated.
+
+- Verification:
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors
+  - `npm run test` → **Backend 214/214 pass** (was 208 + 6 new for `maybeDecodeLegacyBase64`), **Frontend 71/71 pass**
+  - `docker compose restart backend` → live backend serves raw JPEG bytes via the proxy (verified via `curl -o /tmp/img1.jpg && file /tmp/img1.jpg` → "JPEG image data, Exif standard")
+  - Playwright walkthrough: navigate to `/rooms/{id}/generations`, evaluate `Array.from(document.querySelectorAll('img'))` → all 3 images now have `complete: true`, `naturalWidth: 1024`, `naturalHeight: 1024` (was previously all `naturalWidth: 0`)
+
+- Bugs found and fixed (3 issues, one root cause):
+
+  1. **The actual root cause: SupabaseStorageAdapter.upload() was sending `request.body.toString('base64')`**. Supabase's `/storage/v1/object/POST` endpoint stores the body verbatim — including the base64 ASCII string. The bytes that came back via `GET /storage/v1/object/...` were therefore the literal base64 string, not the JPEG. Browser fetch loaded it as text, Content-Type header lied and said `image/jpeg`, the bytes weren't a valid image.
+     - **Fix**: pass `request.body` (a Buffer, which extends Uint8Array, which `fetch` accepts as a `BodyInit`) directly. Required widening the `HttpFetcher.body` type to `string | Uint8Array | Buffer` and casting through `BodyInit` to satisfy TS.
+  2. **Even with raw bytes, the browser still wouldn't render cross-origin Supabase URLs**. The `signedImageUrl` field was being set, but Chrome's **Opaque Response Blocking (ORB)** refused to render the cross-origin `<img>` because Supabase's signed-URL responses don't set `Cross-Origin-Resource-Policy: cross-origin` or a permissive CORS header. Symptom: `net::ERR_BLOCKED_BY_ORB` in DevTools.
+     - **Fix**: added `GET /api/images/generations/:id` endpoint that streams the bytes through the backend. Browser loads `/api/images/...` which is same-origin (proxied via nginx), ORB doesn't apply, and we set `Cross-Origin-Resource-Policy: same-origin` defensively.
+  3. **Legacy data is base64-encoded**. New uploads are raw bytes (after fix #1), but all generations uploaded before this fix are still stored as base64 strings. The image proxy detects this by checking the first 5 bytes (`/9j/` for JPEG, `iVBOR` for PNG) + validating the buffer is a multiple-of-4 valid base64 string + passing through raw images untouched. The decoder is exported as `maybeDecodeLegacyBase64` and unit-tested with 6 cases (raw JPEG, raw PNG, legacy base64 JPEG, legacy base64 PNG, empty buffer, garbage).
+
+- Lessons recorded:
+  - **Don't base64-encode binary uploads to REST APIs**. Supabase (and most S3-compatible APIs) want raw bytes. If you base64-encode on the way out, you're storing the literal ASCII string.
+  - **Chrome ORB is silent**. A failed image load shows as a blank space, not a broken-image icon. Always check `naturalWidth: 0` programmatically to detect it.
+  - **Proxy cross-origin assets through the same origin** when possible. It sidesteps ORB and lets you enforce auth on every image load.
+
+- Known limitations:
+  - The proxy streams JPEG only (we set `Content-Type: image/jpeg`); PNG generations will be mis-typed. F8 (References) and the future content-type negotiation can fix this.
+  - The proxy caches for 5 minutes (`Cache-Control: private, max-age=300`). Generations are immutable, so this is safe.
+  - The legacy-base64 decode is conservative — if a non-image buffer happens to start with `/9j/` or `iVBOR` AND is valid base64, it'll be decoded to garbage that the browser fails to render (then the existing `onError` placeholder kicks in).
+
+---
+
 ### 2026-06-20 — F6 Approval UX
 
 - Reviewer: Project Owner (self)

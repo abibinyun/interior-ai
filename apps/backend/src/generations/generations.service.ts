@@ -8,6 +8,7 @@ import {
 } from '../common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SessionContext } from '../sessions/session.context';
+import { STORAGE_ADAPTER, StorageAdapter } from '../storage/storage.adapter';
 import { AnchorBuilder } from './anchor-builder';
 import { StartBatchDto } from './dto/start-batch.dto';
 import { GenerationsRepository } from './generations.repository';
@@ -28,7 +29,21 @@ export interface SerializedGeneration {
   status: string;
   prompt: string;
   negativePrompt: string | null;
+  /**
+   * Public URL to the rendered image. Populated by the storage adapter
+   * (Supabase). Used for direct browser loading in dev (where the
+   * bucket may be public) and as a fallback if signed-url generation
+   * fails.
+   */
   imageUrl: string | null;
+  /**
+   * Short-lived signed URL to the rendered image. Preferred over
+   * `imageUrl` in the frontend because it works regardless of bucket
+   * visibility and expires automatically (default 15 min). Generated
+   * lazily for COMPLETED generations only.
+   */
+  signedImageUrl: string | null;
+  signedImageUrlExpiresAt: string | null;
   storageObjectKey: string | null;
   errorCode: string | null;
   errorMessage: string | null;
@@ -48,6 +63,7 @@ export class GenerationsService {
     @Inject(AnchorBuilder) private readonly anchorBuilder: AnchorBuilder,
     @Inject(ConfigService) private readonly config: ConfigService,
     @Inject(SessionContext) private readonly sessionContext: SessionContext,
+    @Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter,
   ) {}
 
   async startBatch(roomId: string, dto: StartBatchDto): Promise<BatchResult> {
@@ -126,13 +142,13 @@ export class GenerationsService {
 
     return {
       batchId,
-      items: created.map(this.serialize),
+      items: await Promise.all(created.map(this.serialize)),
     };
   }
 
   async listByBatchId(batchId: string): Promise<SerializedGeneration[]> {
     const items = await this.repo.findByBatchId(batchId);
-    return items.map(this.serialize);
+    return Promise.all(items.map(this.serialize));
   }
 
 async listByRoomId(roomId: string): Promise<SerializedGeneration[]> {
@@ -142,7 +158,7 @@ async listByRoomId(roomId: string): Promise<SerializedGeneration[]> {
     // APPROVED room so the user can see what was approved.
     await this.requireRoom(roomId);
     const items = await this.repo.findByRoomId(roomId);
-    return items.map(this.serialize);
+    return Promise.all(items.map(this.serialize));
   }
 
 async listByBatchIdInRoom(
@@ -156,7 +172,7 @@ async listByBatchIdInRoom(
     if (owned.length === 0) {
       throw new NotFoundError('Batch not found in this room.');
     }
-    return owned.map(this.serialize);
+    return Promise.all(owned.map(this.serialize));
   }
 
   async get(id: string): Promise<SerializedGeneration> {
@@ -276,25 +292,51 @@ async listByBatchIdInRoom(
     return room as Room;
   }
 
-  private serialize = (g: {
+  private serialize = async (g: {
     id: string; batchId: string; roomId: string; optionIndex: number; parentGenerationId: string | null;
     status: string; prompt: string; negativePrompt: string | null; imageUrl: string | null;
     storageObjectKey: string | null; errorCode: string | null; errorMessage: string | null;
     createdAt: Date; updatedAt: Date;
-  }): SerializedGeneration => ({
-    id: g.id,
-    batchId: g.batchId,
-    roomId: g.roomId,
-    optionIndex: g.optionIndex,
-    parentGenerationId: g.parentGenerationId,
-    status: g.status,
-    prompt: g.prompt,
-    negativePrompt: g.negativePrompt,
-    imageUrl: g.imageUrl,
-    storageObjectKey: g.storageObjectKey,
-    errorCode: g.errorCode,
-    errorMessage: g.errorMessage,
-    createdAt: g.createdAt.toISOString(),
-    updatedAt: g.updatedAt.toISOString(),
-  });
+  }): Promise<SerializedGeneration> => {
+    const base: SerializedGeneration = {
+      id: g.id,
+      batchId: g.batchId,
+      roomId: g.roomId,
+      optionIndex: g.optionIndex,
+      parentGenerationId: g.parentGenerationId,
+      status: g.status,
+      prompt: g.prompt,
+      negativePrompt: g.negativePrompt,
+      imageUrl: g.imageUrl,
+      signedImageUrl: null,
+      signedImageUrlExpiresAt: null,
+      storageObjectKey: g.storageObjectKey,
+      errorCode: g.errorCode,
+      errorMessage: g.errorMessage,
+      createdAt: g.createdAt.toISOString(),
+      updatedAt: g.updatedAt.toISOString(),
+    };
+
+    // For COMPLETED generations, generate a short-lived signed URL.
+    // The frontend prefers `signedImageUrl` over `imageUrl` because it
+    // works regardless of bucket visibility (the public `imageUrl`
+    // requires a public bucket, which isn't always configured).
+    if (g.status === 'COMPLETED' && g.storageObjectKey) {
+      try {
+        const signed = await this.storage.signedUrl(
+          g.storageObjectKey,
+          this.config.get<number>('SIGNED_URL_TTL_SECONDS', 900),
+        );
+        base.signedImageUrl = signed.signedUrl;
+        base.signedImageUrlExpiresAt = signed.expiresAt.toISOString();
+      } catch (err) {
+        this.logger.warn(
+          { generationId: g.id, err },
+          'signedUrl failed; returning generation without signedImageUrl',
+        );
+      }
+    }
+
+    return base;
+  };
 }

@@ -54,7 +54,12 @@ export class SupabaseStorageAdapter implements StorageAdapter {
       response = await this.http.fetch(url, {
         method: 'POST',
         headers,
-        body: request.body.toString('base64'),
+        // Send raw bytes (Node Buffer). The fetcher base64-encodes
+        // string bodies on the wire; passing a Buffer ensures the
+        // underlying fetch gets the raw byte stream so Supabase stores
+        // the actual binary (and the response body is also raw bytes
+        // when re-fetched).
+        body: request.body,
         signal: controller.signal,
         timeoutMs: 30000,
       });
