@@ -22,6 +22,11 @@ export interface Room {
   approvedGenerationId: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * The room's design brief, included in `GET /api/rooms/:id`. Null
+   * when no brief has been written yet.
+   */
+  designBrief?: DesignBrief | null;
 }
 
 export interface DesignBrief {

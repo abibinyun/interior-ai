@@ -127,7 +127,7 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F4 — Generation UI
+### F4 — Generation UI ✅ Completed 2026-06-20
 
 **Objective**: Implement Step 4 (Generate Design Concepts) of the user journey.
 

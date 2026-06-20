@@ -492,6 +492,65 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F4 Generation UI
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: real `RoomDetailPage` (brief editor + recent generations), real `GenerationsPage` (3-option grid + polling + approve), `<BriefEditor>` + `<GenerationCard>` + `generation-status` helpers, `useRoom` / `useUpdateBrief` / `useBatchStatus` / `useCreateBatch` / `useApproveGeneration` / `useReopenRoom` / `useGenerationsByRoom` hooks, extended `Room` type with `designBrief`, 11 new frontend tests.
+
+- Verification:
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors
+  - `npm run test --workspace=@interior/frontend` → **60/60 pass** (49 F1+F2+F3 + 11 new F4)
+  - `npm run build --workspace=@interior/frontend` → Vite bundle (256 KB JS, gzip 77 KB; 19 KB CSS, gzip 4 KB)
+  - Backend regression: 205/206 pass (one pre-existing M16 flake from real Pollinations network call; not F4-related)
+  - **End-to-end smoke** through Docker frontend container:
+    - Project create → style set → room create → brief update all round-trip correctly via the frontend proxy
+
+- F4 deliverables:
+  - **`<BriefEditor>`** — 5 free-text fields from `UpdateBriefDto` (purpose, occupants, lightingPreferences, furnitureRequirements, constraints). Pre-populated from `room.designBrief` on first load. Per-field errors from `error.fields`. Save button shows "Saved" confirmation.
+  - **`<GenerationCard>`** — single cell in the 3-option grid. Four states:
+    - **PENDING/PROCESSING** → pulsing skeleton (`animate-pulse`) with status text label
+    - **COMPLETED** → image + "Approve" button (hidden when room already has an approval)
+    - **FAILED** → clay-toned error card with the documented `error_code` (PROVIDER_TIMEOUT / PROVIDER_REJECTED / PROVIDER_BROKEN / STORAGE_FAILED) translated via `generationErrorTitle`
+    - **isApproved** → green "✓ Approved" ribbon overlay + no approve button
+  - **`generation-status` helpers** — `GENERATION_STATUS_LABEL` (PENDING → "Queued", PROCESSING → "Generating", etc.) + `generationErrorTitle(code)` returning friendly titles per documented `error_code`. Kept in a separate file to satisfy `react-refresh/only-export-components`.
+  - **`GenerationsPage` (real)** — full generation flow:
+    - Reads the room to detect whether a brief has been written (any field non-empty); disables the Generate button otherwise with an inline hint.
+    - **Generate button** → `useCreateBatch()` → seeds `batchQueryKey(roomId, batchId)` cache + sets `activeBatchId`.
+    - **`useBatchStatus`** uses TanStack Query's `refetchInterval` to poll the batch endpoint every 2s while any row is PENDING/PROCESSING; auto-stops polling when all rows are COMPLETED or FAILED. Uses `refetchIntervalInBackground: false` so the browser doesn't hammer the backend in a backgrounded tab.
+    - 3-card grid with per-card Approve button. Only the first approve succeeds (subsequent cards hide their approve button once the room has an approval).
+    - Approve button calls `useApproveGeneration()` which invalidates the room + generations caches (room status flips to APPROVED).
+    - `EmptyGenerationsHint` for first-time visitors.
+    - Quiet "All generations (N)" details panel below for history.
+  - **`RoomDetailPage` (real)** — wraps `<BriefEditor>` plus a small "Generations" preview section that links into `/rooms/:id/generations`. Shows approved generation id + status pill.
+  - **Hooks**:
+    - `useRoom(roomId)` — query for `GET /api/rooms/:id` (includes brief inline).
+    - `useUpdateBrief(roomId)` — mutation that invalidates the room on success.
+    - `useGenerationsByRoom(roomId)` — query for `GET /api/rooms/:id/generations` (recent 50).
+    - `useBatchStatus(roomId, batchId, { pollWhile? })` — polling query using `refetchInterval` (TanStack Query's built-in polling).
+    - `useCreateBatch(roomId)` — mutation that seeds the batch cache + invalidates the room's generations list.
+    - `useApproveGeneration(roomId)` — mutation that invalidates both room + generations caches.
+    - `useReopenRoom(roomId)` — mutation that clears the approval (used when an APPROVED room needs a new batch; F7 polish may add a button).
+  - **API types** — `Room` extended with `designBrief?: DesignBrief | null` so the brief can be read from the room GET instead of needing a separate `/brief` endpoint (the backend doesn't expose one).
+  - **11 new tests**:
+    - `GenerationCard.test.tsx` (9) — `GENERATION_STATUS_LABEL` coverage, `generationErrorTitle` for every documented code + null fallback, image + Option N rendering, approved ribbon hides approve button, unapproved shows it, FAILED card uses friendly title + error message, PENDING/PROCESSING shows pulsing skeleton.
+    - `BriefEditor.test.tsx` (3) — fields prefill from room brief, empty fields when no brief, submit fires on click.
+
+- Bugs found and fixed during F4 verification (lessons recorded):
+  - **`@next/next/no-img-element` lint rule not installed**: those disable directives referenced a rule from the Next.js plugin which isn't loaded in this Vite project. Fix: removed the directives; `<img>` is fine in Vite + React.
+  - **`react-refresh/only-export-components` warnings on `<GenerationCard />`**: file exported both a component and helper constants/functions. Fix: extracted `GENERATION_STATUS_LABEL` and `generationErrorTitle` into `generation-status.ts`.
+  - **Stale `GenerationStatusLabel`/`generationErrorTitle` import in test**: after the extract, the test was importing from the wrong path. Fix: updated import to `./generation-status`.
+  - **`approve(roomId, generationId)` signature mismatch**: hook called `approve(roomId, input.generationId)` but the API function expects `{generationId: string}`. Fix: pass `input` directly.
+  - **Stale edits left orphan tokens in `GenerationsPage.tsx`**: an iterative edit appended new content without removing the old. Fix: rewrote the file cleanly from scratch.
+
+- Known limitations:
+  - No retry button on FAILED generation cards. The user can re-Generate to spin up a new batch (the failed row remains in history); per-card "retry this option" UX is out of scope.
+  - The polling interval is fixed at 2s. The backend's pipeline target is 10–30s, so 2s polling is well within reason and adds minimal load. Future tuning can be done via env.
+  - Real generation calls still hit the real Pollinations API; in CI / offline, the page surfaces the documented `PROVIDER_TIMEOUT` / `PROVIDER_REJECTED` / `STORAGE_FAILED` errors via the F10 friendly mapping (verified in `generationErrorTitle`).
+
+---
+
 ### 2026-06-20 — F3 Project Flow
 
 - Reviewer: Project Owner (self)
