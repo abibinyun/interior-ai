@@ -19,6 +19,40 @@
   h3 {
     @apply font-display tracking-tight text-balance;
   }
+
+  /* F11 polish: keyboard focus rings on every interactive element.
+   * Uses :focus-visible so the ring only shows for keyboard nav,
+   * not for mouse clicks. Per-component focus classes still work
+   * because this rule applies a complementary ring, not a border. */
+  :focus-visible {
+    outline: none;
+  }
+  a[href]:focus-visible,
+  button:not(:disabled):focus-visible,
+  [role='button']:not([aria-disabled='true']):focus-visible,
+  input:not(:disabled):focus-visible,
+  select:not(:disabled):focus-visible,
+  textarea:not(:disabled):focus-visible,
+  summary:focus-visible,
+  [tabindex]:not([tabindex='-1']):focus-visible {
+    @apply outline-none ring-2 ring-forest-500 ring-offset-2 ring-offset-cream-50;
+  }
+
+  /* F11 polish: respect prefers-reduced-motion. Tailwind has
+   * motion-reduce: variants for individual classes, but the
+   * Skeleton/GenerationCard use the bare animate-pulse utility.
+   * Disable animation at the source so screen-reader users and
+   * users with motion sensitivities see static placeholders. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {

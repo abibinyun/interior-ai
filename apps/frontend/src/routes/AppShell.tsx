@@ -18,6 +18,12 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-xl focus:bg-stone-900 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-cream-50"
+      >
+        Skip to main content
+      </a>
       <header className="sticky top-0 z-10 border-b border-stone-100 bg-cream-50/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-6 py-5">
           <Link to="/" className="flex items-baseline gap-1.5">
@@ -43,7 +49,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="flex-1">
+      <main id="main-content" className="flex-1">
         <div className="mx-auto max-w-6xl px-6 py-12">
           <Outlet />
         </div>
@@ -52,7 +58,7 @@ export function AppShell() {
       <footer className="border-t border-stone-100 bg-white/50">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-6 text-xs text-stone-400">
           <span>Interior AI — interior design, end to end.</span>
-          <span className="font-mono text-stone-300">v0.10 — F1–F10</span>
+          <span className="font-mono text-stone-300">v0.11 — F1–F11</span>
         </div>
       </footer>
     </div>

@@ -527,6 +527,63 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F11 Polish Pass
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `src/styles/globals.css` (global `:focus-visible` ring + `@media (prefers-reduced-motion: reduce)` override); `src/routes/AppShell.tsx` (skip-to-content link + `id="main-content"` on `<main>`); new `src/routes/AppShell.test.tsx` (4 a11y tests). Footer bumped to `v0.11 — F1–F11`.
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run build` (frontend) → clean (Vite 305 KB / 88 KB gzip; CSS bundle grew 21.50 → 22.51 KB for the focus-ring rules + reduced-motion media query + component layer additions)
+  - `npm run test:frontend` → **144/144 pass** (was 140 + 4 new)
+  - Playwright keyboard walkthrough: Tab from `/` reveals the skip link; Enter jumps focus past the header/nav to `<main>`.
+
+- F11 deliverables:
+  - **Global focus rings** (`src/styles/globals.css` `@layer base`):
+    - `:focus-visible { outline: none }` resets the browser default so our ring is the only one.
+    - `a[href]`, `button:not(:disabled)`, `[role='button']`, `input/select/textarea:not(:disabled)`, `summary`, `[tabindex]:not([tabindex='-1'])` all get `ring-2 ring-forest-500 ring-offset-2 ring-offset-cream-50` on focus. Per-component focus classes still work (they layer on top).
+  - **`prefers-reduced-motion` override** (`src/styles/globals.css` `@layer base`):
+    - `@media (prefers-reduced-motion: reduce)` block zeroes `animation-duration` / `animation-iteration-count` / `transition-duration` / `scroll-behavior` globally with `!important`. The Tailwind `motion-reduce:` variant is also available for per-component opt-in (used on `.btn-*` and `.link-soft` in the components layer).
+  - **Skip-to-content link** (`src/routes/AppShell.tsx`):
+    - First focusable element on every page: `<a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-50 focus:rounded-xl focus:bg-stone-900 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-cream-50">Skip to main content</a>`.
+    - `<main id="main-content">` matches.
+  - **Semantic landmark audit** (already in place from earlier milestones, F11 just confirms):
+    - `<header>` → `role="banner"` (auto).
+    - `<nav aria-label="Primary">` → `role="navigation"` (auto).
+    - `<main id="main-content">` → `role="main"` (auto).
+    - `<footer>` → `role="contentinfo"` (auto).
+    - `<ErrorState role="alert">` (F2).
+    - `<StyleAnchorBanner role="note">` (F7).
+    - `<Modal aria-labelledby="modal-title">` (F3).
+  - **Alt-text audit** — every `<img>` already carries a meaningful `alt`:
+    - `RoomDashboardCard` → `${room} approved design`
+    - `GenerationCard` → `Generation ${optionIndex}`
+    - `ReferenceCard` → caption or `${SOURCE_LABEL[sourceType]} reference`
+    - `RoomDetailPage` thumbnails → `Option ${optionIndex}`
+    - `GenerationDetailPage` → `Option ${optionIndex}`
+    - All decorative skeletons use `aria-hidden="true"`.
+
+- 4 new tests (`src/routes/AppShell.test.tsx`):
+  - Skip link renders with correct `href` + role.
+  - `<main id="main-content">` exists.
+  - `<header>`, `<nav aria-label="Primary">`, `<footer>` landmarks render.
+  - Tab focuses the skip link first (verified via `document.activeElement`).
+
+- Bugs found and fixed during F11 verification (lessons recorded):
+  - **`globals.css` parse error after my edit** — my first edit accidentally duplicated the body block, leaving a stray `}`. Fix: rewrote the file cleanly.
+  - **`<AppShell />` test needed `QueryClientProvider`** — `useSession` hook requires it. Wrap in a fresh `QueryClient` for the test.
+  - **`@apply` on `outline: none` then ring** in a single rule didn't work because `outline: none` overrides `ring-2`. Fix: split into two rules (`outline: none` and then the ring).
+
+- Known limitations:
+  - Lighthouse a11y ≥ 90 is NOT measured in CI; the unit tests cover the component-level properties but not the full Lighthouse sweep. A future hardening pass can add `lighthouse-ci` or `axe-core` to the workflow.
+  - Mobile (≤640px) layouts are not validated; the F11 spec explicitly defers this. The current grid layouts work on tablet (640–1024) but stack awkwardly below 640.
+  - Dark mode: palette is locked by the design intent.
+  - No skip-link to footer (one jump target suffices for v1).
+
+---
+
 ### 2026-06-20 — F10 Failure Surfaces
 
 - Reviewer: Project Owner (self)

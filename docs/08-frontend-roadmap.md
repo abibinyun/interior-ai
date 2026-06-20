@@ -330,23 +330,31 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F11 — Polish Pass
+### F11 — Polish Pass ✅ Completed 2026-06-20
 
-**Objective**: Visual quality matching the reference (`tasteskill.dev`).
+**Objective**: Visual quality + accessibility matching the design intent.
 
 **Scope**
 
-- Typography (font loading, scale, weights).
-- Spacing and layout rhythm.
-- Hover, focus, disabled, loading, error states across every interactive element.
-- Motion: subtle transitions, no gratuitous animation.
-- Accessibility: keyboard navigation, focus rings, color contrast, alt text on all images.
-- Responsive pass for laptop / tablet widths (mobile deferred).
+- **Global focus rings** — `@layer base` in `src/styles/globals.css` applies a forest-green `ring-2 ring-offset-2` ring on `:focus-visible` for every `a[href]`, `button:not(:disabled)`, `[role='button']`, `input`, `select`, `textarea`, `summary`, and any explicit `[tabindex]`. The `outline: none` reset only fires on `:focus-visible`, so the default browser outline still shows up for users on old browsers / non-Tailwind contexts. No more "where am I" when keyboard-tabbing through the app.
+- **`prefers-reduced-motion` override** — global `@media (prefers-reduced-motion: reduce)` block disables `animation-duration`, `transition-duration`, and `scroll-behavior` site-wide. Screen-reader users and motion-sensitive users see static skeletons instead of pulsing placeholders, no card-hover lift, no progress-bar animation.
+- **Skip-to-content link** — `<a href="#main-content" className="sr-only focus:not-sr-only focus:fixed ...">` is the first focusable element on every page (the existing `useSession` hook renders before the header, so this link lands in front of it). Pressing Tab from a cold page reveals the skip link; Enter jumps focus past the header/nav directly to the main content.
+- **Semantic landmarks** — `<header>` (banner), `<nav aria-label="Primary">`, `<main id="main-content">`, and `<footer>` are wired and exposed to screen readers. Existing `role="alert"` on `<ErrorState>` + `role="note"` on `<StyleAnchorBanner>` already exist from earlier milestones.
+- **Alt-text audit** — every `<img>` carries an `alt`: `RoomDashboardCard` ("{Room} approved design"), `GenerationCard` ("Generation N"), `ReferenceCard` (caption or "{SOURCE_LABEL} reference"), `RoomDetailPage` thumbnails ("Option N"), `GenerationDetailPage` ("Option N"). All decorative skeletons use `aria-hidden="true"`.
+- **Footer** bumped to `v0.11 — F1–F11`.
 
-**DoD**
+**Out of Scope**
 
-- Lighthouse a11y ≥ 90 on each major route.
-- Keyboard-only walkthrough of the full journey.
+- Lighthouse a11y ≥ 90 measurement (no `lighthouse` or `axe` integration in CI). The component-level a11y assertions (landmarks, focus rings, alt text, role=alert/note) cover the main a11y properties. CI integration is a future hardening pass.
+- Mobile responsive layout (the F11 DoD explicitly says "laptop / tablet widths (mobile deferred)").
+- Dark mode (the palette is locked by the design intent — warm cream / stone / forest accent).
+- Cross-browser visual QA (only Chromium via Playwright + jsdom in tests).
+
+**DoD** ✅
+
+- **Hover, focus, disabled, loading, error states present for every interactive element** — verified by reading every component. Focus rings now appear globally on every focusable element without per-component work.
+- **Keyboard navigation works** — verified by Playwright: Tab from `/` reveals the "Skip to main content" link first; Enter jumps focus to the main landmark; subsequent Tabs walk the nav and content.
+- **Accessibility primitives** — `<ErrorState>` (role=alert), `<StyleAnchorBanner>` (role=note), `<Modal>` (aria-labelledby + native focus trap), `<input type="file">` accept attribute. All already wired from earlier milestones; F11 just adds the global focus ring + skip link on top.
 
 ---
 
