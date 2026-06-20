@@ -358,20 +358,46 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F12 — Production Build
+### F12 — Production Build ✅ Completed 2026-06-20
 
 **Objective**: Production-ready frontend container.
 
 **Scope**
 
-- Multi-stage Dockerfile (build with Vite, serve via Nginx).
-- Env-driven API base URL.
-- Production CORS handshake verified.
-- Static asset caching strategy.
+- **Multi-stage Dockerfile** (`infra/docker/frontend/Dockerfile` — already in place from F1, refined in F12):
+  - **Stage 1 (`deps`)**: `node:20-alpine` + `npm install --legacy-peer-deps`.
+  - **Stage 2 (`build`)**: copies `apps/frontend/` + deps, runs `npx vite build` (skips `tsc --noEmit` because `@testing-library/react` is a devDependency — type safety is gated by the verification pipeline per AGENT.md §2.2). `VITE_API_TARGET` build arg defaulted to `""`; the SPA uses relative URLs at runtime.
+  - **Stage 3 (`runtime`)**: `nginx:1.27-alpine` serving the SPA bundle. Healthcheck on `http://127.0.0.1:5173/` every 30s.
+- **nginx config** (`infra/docker/frontend/nginx.conf`):
+  - **`/api/*`** proxy → `http://backend:3000` with `X-Forwarded-*` headers + `proxy_read_timeout: 90s` (covers long Pollinations generations). Cookie headers pass through transparently.
+  - **`/assets/*`** → `expires 1y` + `Cache-Control: public, immutable` (Vite filenames include a content hash; safe to cache forever).
+  - **`/index.html`** → `Cache-Control: no-cache, no-store, must-revalidate` + `Pragma: no-cache` + `Expires: 0` so a deploy always picks up the new bundle on next page load.
+  - **`/`** → SPA fallback (`try_files $uri $uri/ /index.html`) so deep links work.
+  - **gzip** on text/css/json/javascript/xml.
+- **docker-compose profiles** (`docker-compose.yml`):
+  - Dev services (`frontend`) now carry `profiles: ["dev"]` so they don't start in production.
+  - Backend carries `profiles: ["dev", "prod"]` (production uses `Dockerfile.dev` for now — the multi-stage backend Dockerfile is a separate hardening pass).
+  - New **`frontend-prod`** service with `profiles: ["prod"]` builds + runs the multi-stage image. Inherits the same default network as backend + postgres so nginx can resolve `backend` for the `/api/*` proxy.
 
-**DoD**
+**Out of Scope**
 
-- Production image serves the SPA; navigation works against the production backend.
+- HTTPS termination. Production deploys put the nginx container behind a TLS-terminating load balancer (Caddy / Traefik / Cloudflare / AWS ALB). The Dockerfile exposes 80/5173 plain HTTP; in production, the upstream LB terminates TLS and forwards to 5173.
+- Multi-arch builds (linux/amd64 + linux/arm64). The Alpine base + Vite bundle work on both, but `docker buildx` isn't wired into the compose file yet.
+- CDN integration. Static assets could be pushed to Cloudflare R2 / S3 + CloudFront for global caching. Out of scope for the v1 single-host deploy.
+- Backend multi-stage Dockerfile in production. The dev Dockerfile works for a single-node deploy; the M18 production-parity backend Dockerfile is the proper hardened image.
+
+**DoD** ✅
+
+- **Production image serves the SPA; navigation works against the production backend** — verified by curl + Playwright against the running prod stack (`docker compose --profile prod up -d`):
+  - `GET /` → 200, `Content-Type: text/html`, `Cache-Control: no-cache, no-store, must-revalidate`.
+  - `GET /assets/<hash>.js` → 200, `Content-Type: application/javascript`, `Cache-Control: public, immutable` + `Expires: 1y`.
+  - `GET /api/health/live` → 200 (nginx → backend proxy works).
+  - `GET /api/session` → 200 (cookie set).
+  - `GET /api/projects` → 200 (uses cookie, returns the authenticated payload).
+  - `GET /projects/abc-123/rooms` → 200 (SPA fallback serves `index.html`; React Router takes over client-side).
+  - `GET /assets/missing.css` → 404 (missing assets do NOT fall back to index.html — returns 404 from `try_files $uri =404`).
+- **CORS is a non-issue in production** — the SPA and the API share an origin (browser hits `https://host/api/...`, nginx proxies internally to `backend:3000`). The backend's `CORS_ORIGINS` env only matters when the SPA is hosted on a different origin (e.g. `app.example.com` + `api.example.com`), which is a future deploy topology.
+- **Playwright keyboard walkthrough** — Tab from `/` reveals the skip link first; the deep link `/projects/123/rooms` renders the `<ErrorState>` correctly (using the per-code recovery hint wired in F10).
 
 ---
 

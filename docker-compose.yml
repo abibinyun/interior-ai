@@ -34,6 +34,7 @@ services:
     restart: "no"
 
   backend:
+    profiles: ["dev", "prod"]
     build:
       context: .
       dockerfile: infra/docker/backend/Dockerfile.dev
@@ -71,6 +72,7 @@ services:
       - ./apps/backend/src:/repo/apps/backend/src:ro
 
   frontend:
+    profiles: ["dev"]
     build:
       context: .
       dockerfile: infra/docker/frontend/Dockerfile.dev
@@ -90,6 +92,30 @@ services:
       - ./apps/frontend/vite.config.ts:/app/vite.config.ts:ro
       - ./apps/frontend/tailwind.config.js:/app/tailwind.config.js:ro
       - ./apps/frontend/postcss.config.js:/app/postcss.config.js:ro
+
+  # F12: Production frontend — multi-stage build (deps → build →
+  # runtime) served by nginx with the SPA-fallback + /api proxy
+  # config. The bundle is baked with VITE_API_TARGET unset; the
+  # SPA uses relative URLs and nginx routes /api/* to the backend
+  # service. CORS becomes a non-issue because the SPA and the
+  # API share an origin (https://host/api/... → proxied internally).
+  frontend-prod:
+    profiles: ["prod"]
+    build:
+      context: .
+      dockerfile: infra/docker/frontend/Dockerfile
+      args:
+        # The build arg is informational only; the SPA uses
+        # relative URLs and the nginx proxy routes /api/* to the
+        # backend service.
+        VITE_API_TARGET: ""
+    container_name: interior-frontend-prod
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "5173:5173"
 
 volumes:
   postgres-data:

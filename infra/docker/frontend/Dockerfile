@@ -23,11 +23,19 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY apps/frontend/ ./
-# VITE_API_TARGET is baked into the bundle at build time so the
-# runtime nginx config can proxy /api/* to the backend service.
-ARG VITE_API_TARGET=http://localhost:3000
+# VITE_API_TARGET is informational only — the SPA uses relative
+# URLs (/api/...) and the runtime nginx proxy routes /api/* to
+# the backend service. In Docker, the build arg is unset; in a
+# dev build (vite dev via Dockerfile.dev) the docker-compose
+# service overrides it.
+ARG VITE_API_TARGET=""
 ENV VITE_API_TARGET=$VITE_API_TARGET
-RUN npm run build
+# Skip `tsc --noEmit` here — testing-library/react is a
+# devDependency and the production build doesn't install it.
+# Type safety is gated by `npm run typecheck` in the verification
+# pipeline (AGENT.md §2.2). Vite's build still runs esbuild's
+# type-stripping for tree-shaking.
+RUN npx vite build
 
 FROM nginx:1.27-alpine AS runtime
 # Copy the SPA bundle.

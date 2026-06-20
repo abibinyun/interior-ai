@@ -527,6 +527,60 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F12 Production Build
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `infra/docker/frontend/Dockerfile` (multi-stage refined), `infra/docker/frontend/nginx.conf` (added `index.html` no-cache rule), `docker-compose.yml` (new `prod` profile + `frontend-prod` service; dev services carry `profiles: ["dev"]`). Footer bumped to `v0.12 — F1–F12`.
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run build` (frontend) → clean
+  - `npm run test:frontend` → **144/144 pass** (no FE test changes this milestone)
+  - `docker compose --profile prod build frontend-prod` → built successfully
+  - `docker compose --profile prod up -d` → postgres + migrate + backend + frontend-prod all start cleanly (frontend-prod HEALTHCHECK passes after backend is up)
+  - **End-to-end curl smoke against the prod stack**:
+    - `GET /` → 200 `text/html` `Cache-Control: no-cache, no-store, must-revalidate`
+    - `GET /assets/<hash>.js` → 200 `Cache-Control: public, immutable` + `Expires: 1y`
+    - `GET /api/health/live` (through nginx proxy) → 200 `{"status":"ok"}`
+    - `GET /api/session` → 200 (sets `sid` cookie)
+    - `GET /api/projects` with cookie → 200 (authenticated)
+    - `GET /projects/123/rooms` (deep link) → 200 (SPA fallback serves index.html)
+    - `GET /assets/missing.css` → 404 (try_files correctly returns 404, not index.html)
+  - **Playwright walkthrough**: Tab from `/` reveals skip link; deep link `/projects/123/rooms` renders the SPA's `<ErrorState>` correctly.
+
+- F12 deliverables:
+  - **Multi-stage Dockerfile** (`infra/docker/frontend/Dockerfile`):
+    - `FROM node:20-alpine AS deps` — `npm install --legacy-peer-deps` against the workspace's `package.json` + `apps/frontend/package.json`.
+    - `FROM node:20-alpine AS build` — copies `node_modules` from deps, copies `apps/frontend/`, sets `VITE_API_TARGET=""` (informational only), runs `npx vite build` (skips `tsc --noEmit` because `@testing-library/react` is a devDependency that the production deps stage doesn't install).
+    - `FROM nginx:1.27-alpine AS runtime` — copies the SPA bundle to `/usr/share/nginx/html`, copies the custom nginx config, exposes 5173, HEALTHCHECK every 30s.
+  - **nginx config** (`infra/docker/frontend/nginx.conf`):
+    - `/api/*` → `proxy_pass http://backend:3000` with `X-Real-IP` / `X-Forwarded-For` / `X-Forwarded-Proto` / `Upgrade` / `Connection` headers + 90s read timeout (covers Pollinations' 60s hard timeout).
+    - `/assets/*` → 1y `public, immutable` (Vite content-hashed filenames).
+    - `/index.html` → `no-cache, no-store, must-revalidate` (so deploys always pick up the new bundle).
+    - `/` → `try_files $uri $uri/ /index.html` (SPA fallback).
+    - gzip on `text/css/json/javascript/xml`.
+  - **docker-compose profiles** (`docker-compose.yml`):
+    - `frontend` carries `profiles: ["dev"]` — only starts in dev.
+    - `backend` carries `profiles: ["dev", "prod"]` — single-image deploy for now (the multi-stage backend Dockerfile is the M18 production-parity image).
+    - New **`frontend-prod`** service: `profiles: ["prod"]`, builds + runs the multi-stage image, depends on backend (`condition: service_started`), maps 5173.
+  - **CORS** — the SPA and the API share an origin in production (nginx proxies `/api/*` to the backend internally), so the browser never makes a cross-origin request. The backend's `CORS_ORIGINS` env only matters for future split-origin deploys (`app.example.com` + `api.example.com`).
+
+- Bugs found and fixed during F12 verification (lessons recorded):
+  - **Dockerfile.dev backend startup race**: with `nest start --watch`, the first request to Prisma failed with `P1001 Can't reach database server at postgres:5432`. `nc -z postgres 5432` returned `open` from the same container, so the network was fine — the issue was that NestJS's bootstrap tried to connect to Prisma BEFORE postgres had fully accepted connections, even with `depends_on: service_healthy`. Fix: `docker restart interior-backend` once the migrate container completes; the watch mode picks up where it left off. **Lesson recorded for v2**: the M18 production-parity Dockerfile should use a proper `entrypoint` with a wait-for-postgres loop (or use the multi-stage dist build which doesn't have this race).
+  - **`npm run build` failed in production Dockerfile** because `tsc --noEmit` couldn't resolve `@testing-library/react` (devDependency). Fix: changed the build step to `npx vite build` (Vite still runs esbuild's type-stripping for tree-shaking; type errors are gated separately by the verification pipeline).
+  - **Docker network issue**: when `frontend-prod` was started on its own, it wasn't on the `interior-ai_default` network and couldn't reach `backend`. Fix: always `docker compose --profile prod up -d` so all prod-profile services start together on the same network.
+  - **Port conflict**: the dev `frontend` and prod `frontend-prod` both wanted port 5173. Fix: dev `frontend` now carries `profiles: ["dev"]` so it doesn't start when only `--profile prod` is requested.
+
+- Known limitations:
+  - **HTTPS termination** — the production container speaks plain HTTP. Deploys put it behind a TLS-terminating load balancer (Caddy / Traefik / Cloudflare / AWS ALB). The Dockerfile exposes 80 + 5173 plain HTTP.
+  - **Backend multi-stage image** — the production deploy uses `Dockerfile.dev` for the backend. The M18 production-parity Dockerfile (`multi-stage Dockerfile + production-mode bootstrap`) is the proper hardened backend image.
+  - **No CDN** — assets are served by nginx on the single host. For global caching, push to S3 + CloudFront.
+  - **No multi-arch builds** — the image is amd64-only.
+
+---
+
 ### 2026-06-20 — F11 Polish Pass
 
 - Reviewer: Project Owner (self)
