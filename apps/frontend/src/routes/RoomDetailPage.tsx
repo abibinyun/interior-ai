@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { BriefEditor } from '../components/BriefEditor';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorState } from '../components/ErrorState';
+import { BriefEditor } from '../components/BriefEditor';
 import { Skeleton } from '../components/Skeleton';
 import { useRoom } from '../hooks/useRoomBrief';
-import { useGenerationsByRoom } from '../hooks/useGenerations';
+import { useGenerationsByRoom, useReopenRoom } from '../hooks/useGenerations';
 
 /**
  * F4 Room detail page.
@@ -17,6 +19,8 @@ export function RoomDetailPage() {
   const { roomId } = useParams<{ roomId: string }>();
   const room = useRoom(roomId);
   const gens = useGenerationsByRoom(roomId);
+  const reopenRoom = useReopenRoom(roomId ?? '');
+  const [confirmReopen, setConfirmReopen] = useState(false);
 
   if (!roomId) return <p className="text-stone-500">No room id in the URL.</p>;
   if (room.isPending) {
@@ -37,6 +41,7 @@ export function RoomDetailPage() {
     Object.values(r.designBrief ?? {}).some((v) => typeof v === 'string' && v.trim().length > 0);
 
   return (
+    <>
     <article className="space-y-8">
       <header className="space-y-2">
         <Link
@@ -49,12 +54,25 @@ export function RoomDetailPage() {
           <h1 className="font-display text-display-md font-semibold text-stone-900">
             {humanizeRoomType(r.roomType)}
           </h1>
-          <span
-            data-testid="room-status"
-            className="rounded-full bg-sand-100 px-3 py-1 text-xs font-medium text-sand-700"
-          >
-            {r.status}
-          </span>
+          <div className="flex items-center gap-2">
+            {r.status === 'APPROVED' ? (
+              <button
+                type="button"
+                onClick={() => setConfirmReopen(true)}
+                disabled={reopenRoom.isPending}
+                className="inline-flex items-center gap-2 rounded-xl border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50"
+                data-testid="reopen-room-button"
+              >
+                {reopenRoom.isPending ? 'Reopening…' : 'Reopen room'}
+              </button>
+            ) : null}
+            <span
+              data-testid="room-status"
+              className="rounded-full bg-sand-100 px-3 py-1 text-xs font-medium text-sand-700"
+            >
+              {r.status}
+            </span>
+          </div>
         </div>
         <p className="text-xs text-stone-400">
           Approved generation: {r.approvedGenerationId ?? 'none'}
@@ -120,6 +138,22 @@ export function RoomDetailPage() {
         )}
       </section>
     </article>
+
+    <ConfirmDialog
+      open={confirmReopen}
+      title="Reopen this room?"
+      description="The current approval will be cleared and the room will move back to In Review. The generation rows are preserved."
+      confirmLabel="Reopen"
+      destructive
+      pending={reopenRoom.isPending}
+      onConfirm={() => {
+        reopenRoom.mutate(undefined, {
+          onSettled: () => setConfirmReopen(false),
+        });
+      }}
+      onClose={() => setConfirmReopen(false)}
+    />
+    </>
   );
 }
 

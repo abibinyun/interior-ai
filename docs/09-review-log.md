@@ -492,6 +492,52 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F6 Approval UX
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `<ConfirmDialog>` primitive, `useOptimisticApprove` hook (with onMutate snapshot + rollback + onSettled invalidation), `<GenerationCard>` approve button now shows on every COMPLETED option with re-approval semantics, `GenerationsPage` confirmation modal (variant copy when re-approving), Reopen button on both `GenerationsPage` and `RoomDetailPage` with its own confirmation dialog, 7 new frontend tests (5 ConfirmDialog + 2 optimistic hook).
+
+- Verification:
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors
+  - `npm run test --workspace=@interior/frontend` → **71/71 pass** (64 F1–F5 + 7 new F6)
+  - `npm run build --workspace=@interior/frontend` → Vite bundle (269 KB JS, gzip 80 KB; 19 KB CSS, gzip 4 KB)
+
+- F6 deliverables:
+  - **`<ConfirmDialog>`** — reusable confirmation modal. `destructive` flag switches the confirm button to the clay/red palette. `pending` prop disables both buttons and swaps the confirm label to "Working…". Used by approve + reopen flows.
+  - **`useOptimisticApprove`** — TanStack Query mutation with three lifecycle hooks:
+    - `onMutate` — cancels in-flight room queries, snapshots the room, sets `approvedGenerationId` + `status: 'APPROVED'` optimistically, returns the snapshot for rollback.
+    - `mutationFn` — calls `approve(roomId, { generationId })`.
+    - `onError` — restores the snapshot (rollback) + invokes optional `onErrorToast` for error banner rendering.
+    - `onSettled` — invalidates room + generations caches so the server truth is re-fetched.
+  - **`<GenerationCard>` update** — the approve button is now shown on **every** COMPLETED option. When the option IS the approved one, the button reads "Approved" (and still triggers a re-approval if clicked). When not, it reads "Approve". Both go through the confirmation modal.
+  - **`GenerationsPage` confirmation flow** — clicking Approve opens a `<ConfirmDialog>`. The dialog copy varies based on whether the room already has an approval:
+    - **First-time**: "Approve this option?" — "This sets the room's design language for export. You can re-approve a different option later."
+    - **Re-approval**: "Replace current approval?" — "This room already has an approved option. Approving a different one will replace the current approval."
+    Both go through `useOptimisticApprove` so the UI flips the room status instantly, then the server confirms.
+  - **Reopen flow** — `GenerationsPage` + `RoomDetailPage` both render a "Reopen room" button when the room's status is `APPROVED`. Clicking it opens a destructive `<ConfirmDialog>` ("Reopen" button in clay) that calls `POST /api/rooms/:id/reopen`. The button is disabled while pending.
+  - **Error banner** — the `errorBanner` state surfaces approval / reopen failures via the shared `<ErrorState>` component (F10 friendly mapping applies automatically).
+
+- 7 new tests:
+  - `ConfirmDialog.test.tsx` (5) — title + description rendering, custom + default labels, onConfirm fires, onClose fires via cancel, both buttons disabled when pending.
+  - `useOptimisticApprove.test.tsx` (2) — optimistic update visible before the server resolves, full rollback when the server returns an error.
+  - `GenerationCard.test.tsx` (refactor) — button text now reads "Approve" or "Approved" instead of being hidden; updated the assertion accordingly.
+
+- Bugs found and fixed during F6 verification (lessons recorded):
+  - **JSX fragment mismatch in `RoomDetailPage`**: the article + ConfirmDialog siblings were returned without a fragment, breaking the `</article>` parse. Fix: wrapped in `<>...</>`.
+  - **`friendlyErrorMessage` import was unused** in `GenerationsPage`: leftover from an earlier iteration. Fix: removed the import.
+  - **`ApiError` import was unused** in `RoomDetailPage` after the field-error rendering was removed. Fix: removed.
+  - **GenerationCard's approve button was hidden when approved** (F4 behavior). F6 changes it to always render with a "Approved" label so re-approval is one tap away. Existing tests updated to match.
+  - **`@typescript-eslint/consistent-type-imports` on `import('...')`**: same fix as in BriefEditor.test.tsx — hoist to top-level `import type * as Foo from '...'`.
+
+- Known limitations:
+  - The optimistic update is in-memory only; if the user closes the tab between the optimistic flip and the server response, the rollback is lost (the server is still the source of truth and the next visit will reflect the actual state).
+  - "Approved" button label on the currently-approved option is a small UX win but doesn't yet distinguish "tap to confirm" vs "tap to undo"; F11 polish can address with a clearer label like "Re-approve".
+  - The "approved generation history" (which options were approved previously) is not surfaced; the backend preserves all generations immutably but the UI shows only the current pointer. F11 can add a small history ribbon.
+
+---
+
 ### 2026-06-20 — F5 Refinement UI
 
 - Reviewer: Project Owner (self)

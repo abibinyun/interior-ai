@@ -91,7 +91,7 @@ export function GenerationCard({ generation, isApproved, onApprove, approving, r
                 Refine
               </Link>
             ) : null}
-            {!isApproved ? (
+            {onApprove ? (
               <button
                 type="button"
                 onClick={onApprove}
@@ -99,7 +99,7 @@ export function GenerationCard({ generation, isApproved, onApprove, approving, r
                 className="inline-flex items-center gap-1.5 rounded-xl bg-stone-900 px-3 py-1.5 text-xs font-medium text-cream-50 hover:bg-stone-700 disabled:opacity-50"
                 data-testid={`approve-button-${generation.optionIndex}`}
               >
-                {approving ? 'Approving…' : 'Approve'}
+                {approving ? 'Approving…' : isApproved ? 'Approved' : 'Approve'}
               </button>
             ) : null}
           </div>

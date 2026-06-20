@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../lib/error';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorState } from '../components/ErrorState';
 import { GenerationCard } from '../components/GenerationCard';
 import { Skeleton } from '../components/Skeleton';
 import { useRoom } from '../hooks/useRoomBrief';
 import {
-  useApproveGeneration,
   useBatchStatus,
   useCreateBatch,
   useGenerationsByRoom,
+  useReopenRoom,
 } from '../hooks/useGenerations';
+import { useOptimisticApprove } from '../hooks/useOptimisticApprove';
 
 /**
  * F4 Generation page.
@@ -32,9 +34,13 @@ export function GenerationsPage() {
   const room = useRoom(roomId);
   const list = useGenerationsByRoom(roomId);
   const createBatch = useCreateBatch(roomId ?? '');
-  const approveGen = useApproveGeneration(roomId ?? '');
+  const approveGen = useOptimisticApprove();
+  const reopenRoom = useReopenRoom(roomId ?? '');
   const [activeBatchId, setActiveBatchId] = useState<string | null>(requestedBatch);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [confirmApprove, setConfirmApprove] = useState<string | null>(null);
+  const [confirmReopen, setConfirmReopen] = useState(false);
+  const [errorBanner, setErrorBanner] = useState<unknown>(null);
   const batch = useBatchStatus(roomId, activeBatchId ?? undefined);
 
   // Auto-pick the latest batch once generations load (unless the URL
@@ -92,13 +98,30 @@ export function GenerationsPage() {
   };
 
   const handleApprove = (generationId: string) => {
-    setApprovingId(generationId);
+    setConfirmApprove(generationId);
+  };
+
+  const confirmApproveAction = () => {
+    if (!confirmApprove || !roomId) return;
+    setApprovingId(confirmApprove);
     approveGen.mutate(
-      { generationId },
+      { roomId, generationId: confirmApprove, onErrorToast: setErrorBanner },
       {
-        onSettled: () => setApprovingId(null),
+        onSettled: () => {
+          setApprovingId(null);
+          setConfirmApprove(null);
+        },
       },
     );
+  };
+
+  const confirmReopenAction = () => {
+    if (!roomId) return;
+    reopenRoom.mutate(undefined, {
+      onSettled: () => setConfirmReopen(false),
+      onSuccess: () => setErrorBanner(null),
+      onError: (err) => setErrorBanner(err),
+    });
   };
 
   const approveFieldError =
@@ -115,19 +138,32 @@ export function GenerationsPage() {
             Three options at a time. Pick the one that feels right.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={createBatch.isPending || !hasBrief || r.status === 'APPROVED'}
-          className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-cream-50 hover:bg-stone-700 disabled:opacity-50"
-          data-testid="generate-button"
-        >
-          {createBatch.isPending
-            ? 'Starting…'
-            : r.status === 'APPROVED'
-              ? 'Reopen to generate again'
-              : 'Generate 3 options'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {r.status === 'APPROVED' ? (
+            <button
+              type="button"
+              onClick={() => setConfirmReopen(true)}
+              disabled={reopenRoom.isPending}
+              className="inline-flex items-center gap-2 rounded-xl border border-stone-300 px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50"
+              data-testid="reopen-room-button"
+            >
+              {reopenRoom.isPending ? 'Reopening…' : 'Reopen room'}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={createBatch.isPending || !hasBrief || r.status === 'APPROVED'}
+            className="inline-flex items-center gap-2 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-cream-50 hover:bg-stone-700 disabled:opacity-50"
+            data-testid="generate-button"
+          >
+            {createBatch.isPending
+              ? 'Starting…'
+              : r.status === 'APPROVED'
+                ? 'Reopen to generate again'
+                : 'Generate 3 options'}
+          </button>
+        </div>
       </header>
 
       {!hasBrief ? (
@@ -147,6 +183,10 @@ export function GenerationsPage() {
         <ErrorState error={createBatch.error} onRetry={handleGenerate} />
       ) : null}
 
+      {errorBanner ? (
+        <ErrorState error={errorBanner} onRetry={() => setErrorBanner(null)} />
+      ) : null}
+
       {activeBatch ? (
         <section
           className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
@@ -155,10 +195,11 @@ export function GenerationsPage() {
         >
           {activeBatch.items.map((g) => {
             const isApproved = approvedGenerationId === g.id;
+            // Always go through the confirmation modal so the user
+            // gets a clear "this replaces the current approval" warning
+            // when the room is already APPROVED.
             const onApprove =
-              !isApproved && g.status === 'COMPLETED' && approvedGenerationId === null
-                ? () => handleApprove(g.id)
-                : undefined;
+              g.status === 'COMPLETED' ? () => handleApprove(g.id) : undefined;
             return (
               <GenerationCard
                 key={g.id}
@@ -203,7 +244,37 @@ export function GenerationsPage() {
           </ul>
         </details>
       ) : null}
-    </article>
+
+      <ConfirmDialog
+        open={Boolean(confirmApprove)}
+        title={
+          approvedGenerationId
+            ? 'Replace current approval?'
+            : 'Approve this option?'
+        }
+        description={
+          approvedGenerationId
+            ? 'This room already has an approved option. Approving a different one will replace the current approval.'
+            : 'This sets the room’s design language for export. You can re-approve a different option later.'
+        }
+        confirmLabel="Approve"
+        pending={approveGen.isPending}
+        onConfirm={confirmApproveAction}
+        onClose={() => setConfirmApprove(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmReopen}
+        title="Reopen this room?"
+        description="The current approval will be cleared and the room will move back to In Review. The generation rows are preserved."
+        confirmLabel="Reopen"
+        destructive
+        pending={reopenRoom.isPending}
+        onConfirm={confirmReopenAction}
+        onClose={() => setConfirmReopen(false)}
+      />
+
+      </article>
   );
 }
 

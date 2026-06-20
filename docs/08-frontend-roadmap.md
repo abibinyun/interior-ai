@@ -171,7 +171,7 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F6 — Approval UX
+### F6 — Approval UX ✅ Completed 2026-06-20
 
 **Objective**: Implement Step 6 (Approve Room Design).
 

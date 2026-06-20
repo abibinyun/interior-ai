@@ -57,14 +57,20 @@ describe('<GenerationCard />', () => {
     expect(screen.getByText(/Option 1/)).toBeInTheDocument();
   });
 
-  it('hides the Approve button when approved', () => {
-    renderWithRouter(<GenerationCard generation={makeGen({ id: 'g_a' })} isApproved={true} />);
-    expect(screen.queryByTestId('approve-button-1')).not.toBeInTheDocument();
+  it('renders the Approve button labelled "Approved" when this is the approved option', () => {
+    renderWithRouter(
+      <GenerationCard generation={makeGen({ id: 'g_a' })} isApproved={true} onApprove={() => undefined} />,
+    );
+    const btn = screen.getByTestId('approve-button-1');
+    expect(btn).toBeInTheDocument();
+    expect(btn.textContent).toMatch(/approved/i);
     expect(screen.getByText('✓ Approved')).toBeInTheDocument();
   });
 
   it('renders the Approve button when not approved', () => {
-    renderWithRouter(<GenerationCard generation={makeGen()} isApproved={false} />);
+    renderWithRouter(
+      <GenerationCard generation={makeGen()} isApproved={false} onApprove={() => undefined} />,
+    );
     expect(screen.getByTestId('approve-button-1')).toBeInTheDocument();
   });
 
