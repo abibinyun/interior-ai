@@ -394,7 +394,7 @@ Branching / parallel work is permitted **only** for independent adapter spikes (
 
 ---
 
-### M16 — Observability
+### M16 — Observability ✅ Completed 2026-06-19
 
 **Objective**: Production-grade observability basics.
 
@@ -411,7 +411,7 @@ Branching / parallel work is permitted **only** for independent adapter spikes (
 
 ---
 
-### M17 — Hardening
+### M17 — Hardening ✅ Completed 2026-06-19
 
 **Objective**: Validation depth and security baselines.
 
@@ -429,7 +429,7 @@ Branching / parallel work is permitted **only** for independent adapter spikes (
 
 ---
 
-### M18 — Production Parity
+### M18 — Production Parity ✅ Completed 2026-06-19
 
 **Objective**: Production-ready container and env wiring.
 
