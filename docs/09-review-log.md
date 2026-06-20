@@ -492,6 +492,55 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F1 Foundation
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `apps/frontend/` scaffold (Vite + React 18 + TS strict + Tailwind + React Router v6 + TanStack Query v5), typed `apiFetch` + per-domain API modules, placeholder routes for every screen, `useSession` hook + query client, multi-stage + dev Dockerfiles, nginx config, docker-compose frontend service.
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors
+  - `npm run test` → **216/216 pass** (206 backend + 10 new F1 frontend)
+  - `npm run build` → Vite production bundle builds cleanly (212 KB JS, 10 KB CSS, gzip 68 KB / 2.5 KB)
+  - `docker build -f infra/docker/frontend/Dockerfile .` → multi-stage prod image builds
+  - `docker compose up -d frontend` → Vite dev server boots on :5173; `GET /` returns 200; `GET /api/session` proxies through to the backend (200 with `Set-Cookie: sid=...` and M17 security headers)
+
+- F1 deliverables:
+  - **`apps/frontend/package.json`** — React 18, react-router-dom v6, @tanstack/react-query v5, Tailwind v3.4, vitest + jsdom + Testing Library, ESLint v8 + Prettier + react-hooks plugins. Scripts: `dev`, `build` (tsc + vite), `lint`, `typecheck`, `test`.
+  - **`src/lib/error.ts`** — `ApiError` class + `ErrorCode` enum that mirrors the backend envelope (`docs/05-api-contract.md §2.1`). Carries `.status`, `.code`, `.fields`, `.traceId` so UI can branch on the stable contract codes without juggling raw `Response` objects. Helpers `.isClientError()` / `.isServerError()`.
+  - **`src/api/client.ts`** — typed `apiFetch<T>(path, init)` wrapper around `fetch`. Always sets `credentials: 'include'` (so the backend `sid` cookie attaches), JSON-encodes plain-object bodies and sets `Content-Type: application/json`, leaves `FormData`/`Blob` bodies alone (the browser sets the multipart boundary), normalizes non-2xx responses into `ApiError` with the envelope's `code`, `message`, `fields`, `traceId`. Falls back to `INTERNAL` when the body isn't JSON.
+  - **`src/api/*.ts`** — one module per backend domain (`session`, `projects`, `styles`, `rooms`, `generations`, `references`, `exports`). Each exports typed functions (`listProjects`, `createProject`, `createBatch`, `addReference`, `uploadReference`, `createExport`, …) that call `apiFetch` with the right path + method + body. The frontend never reaches into raw `fetch`.
+  - **`src/lib/query-client.ts`** — singleton TanStack `QueryClient` with conservative defaults: `staleTime: 30s`, `retry` conditional on `ApiError.isClientError()` (don't retry 4xx), `refetchOnWindowFocus: false` (calm design-app behavior).
+  - **`src/hooks/useSession.ts`** — TanStack Query wrapper around `getSession()`. `staleTime: Infinity` because the session is established at app boot and only changes on a manual reset.
+  - **`src/routes/AppShell.tsx`** + **`<App/>`** — top nav + `<Outlet/>` wrapping every screen. React Router v6 with routes for every backend endpoint (Projects, Style, Rooms, RoomDetail, Generations, GenerationDetail, References, Exports) plus a 404 page.
+  - **`src/styles/globals.css`** — Tailwind directives + `font-display` on headings + a `.placeholder-card` component class for the F1 placeholders.
+  - **`tailwind.config.js`** — design tokens (ADR-007): warm cream/sand/stone palette + forest-green accent; serif display font (`Fraunces`) + sans body (`Inter`); display type scale (`text-display-xl/lg/md`); generous whitespace scale (`18`, `22`).
+  - **`src/components/PlaceholderCard.tsx`** — shared placeholder primitive used by every route in F1.
+  - **Tests** (10 total):
+    - `src/lib/error.test.ts` — 3 tests for `ApiError` (constructor, `isClientError`/`isServerError`, message default).
+    - `src/api/client.test.ts` — 7 tests for `apiFetch`: GET + credentials, JSON-encoding, FormData passthrough, 4xx envelope normalization, 5xx fallback to `INTERNAL`, 204 No Content, missing-envelope-code fallback.
+  - **Docker**:
+    - **`infra/docker/frontend/Dockerfile`** — multi-stage (deps → build → nginx:1.27-alpine). `VITE_API_TARGET` build-arg baked into the bundle.
+    - **`infra/docker/frontend/Dockerfile.dev`** — Vite dev server with HMR.
+    - **`infra/docker/frontend/nginx.conf`** — SPA fallback (`try_files $uri /index.html`) + `/api/` proxy to `http://backend:3000`. Gzip on text responses, 1-year `immutable` cache for `/assets/`.
+    - **`docker-compose.yml`** frontend service — replaces the `alpine:3.19` placeholder. Wires `VITE_API_TARGET=http://backend:3000`, mounts source for HMR.
+
+- Bugs found and fixed during F1 verification (lessons recorded):
+  - **Missing script in dev container**: first cut of `Dockerfile.dev` did `COPY package.json ./` from the root context, which copied the *workspace* `package.json` (no `dev` script) into the frontend image. Symptom: container restarted every 5s with `npm error Missing script: "dev"`. Fix: COPY `apps/frontend/package.json` from the root context.
+  - **Bind-mount path mismatch**: docker-compose volumes mounted source to `/repo/apps/frontend/src` while the Dockerfile WORKDIR is `/app`. Vite looked at `/app/src`, didn't find it, served a blank 404. Fix: mount to `/app/src` etc.
+  - **`@typescript-eslint/consistent-type-imports` flagged three imports**: switched the unused-as-value imports to `type` imports.
+  - **`react/no-unescaped-entities` on `don't`**: replaced with `don&apos;t` in `NotFoundPage`.
+  - **TS `RequestInit.body` doesn't accept plain objects**: introduced a `JsonBody` type for the `apiFetch` body param and cast through `BodyInit` at the call site.
+  - **TS interfaces don't satisfy `Record<string, unknown>` structurally**: relaxed `JsonBody` to include `unknown` so caller-side interfaces pass without `as` casts.
+
+- Known limitations:
+  - No per-workspace `package-lock.json` exists — npm workspaces write a single root lockfile. The prod Dockerfile uses `npm install` (slightly less reproducible than `npm ci`) for that reason. Acceptable for v1; future work could split into standalone package scopes.
+  - All routes are F1 placeholders. Real screens land in F2–F9.
+  - No production deployment wired yet (this is F12 scope).
+
+---
+
 ### 2026-06-19 — M18 Production Parity
 
 - Reviewer: Project Owner (self)

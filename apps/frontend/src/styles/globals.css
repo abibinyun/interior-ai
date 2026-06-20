@@ -1,0 +1,28 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    /* cream-50 from tailwind.config.js — warm, premium interior feel */
+    @apply bg-cream-50 text-stone-900;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tight text-balance;
+  }
+}
+
+@layer components {
+  .placeholder-card {
+    @apply rounded-2xl border border-stone-100 bg-white p-6 shadow-sm;
+  }
+}

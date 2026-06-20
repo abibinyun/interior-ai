@@ -54,7 +54,7 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F1 — Foundation
+### F1 — Foundation ✅ Completed 2026-06-20
 
 **Objective**: Vite + React + TypeScript skeleton, tooling, API client primitives.
 

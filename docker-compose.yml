@@ -71,12 +71,25 @@ services:
       - ./apps/backend/src:/repo/apps/backend/src:ro
 
   frontend:
-    image: alpine:3.19
-    container_name: interior-frontend-placeholder
+    build:
+      context: .
+      dockerfile: infra/docker/frontend/Dockerfile.dev
+    container_name: interior-frontend
     restart: unless-stopped
-    command: ["sh", "-c", "echo 'Frontend scaffold lands in F1' && tail -f /dev/null"]
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      # The Vite dev server proxies /api/* to this target.
+      VITE_API_TARGET: http://backend:3000
     ports:
       - "5173:5173"
+    volumes:
+      - ./apps/frontend/src:/app/src:ro
+      - ./apps/frontend/index.html:/app/index.html:ro
+      - ./apps/frontend/vite.config.ts:/app/vite.config.ts:ro
+      - ./apps/frontend/tailwind.config.js:/app/tailwind.config.js:ro
+      - ./apps/frontend/postcss.config.js:/app/postcss.config.js:ro
 
 volumes:
   postgres-data:

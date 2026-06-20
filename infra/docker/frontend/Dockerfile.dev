@@ -1,0 +1,14 @@
+# Dev container for the frontend — runs the Vite dev server with HMR.
+#
+# Source code is bind-mounted so the in-container compiler sees edits
+# immediately. The /api proxy is wired to the `backend` service from
+# docker-compose.
+FROM node:20-alpine
+WORKDIR /app
+COPY apps/frontend/package.json apps/frontend/package-lock.json* ./
+RUN npm install --no-audit --no-fund --legacy-peer-deps
+ENV VITE_API_TARGET=http://backend:3000
+EXPOSE 5173
+HEALTHCHECK --interval=30s --timeout=3s --retries=5 \
+  CMD wget -q --spider http://127.0.0.1:5173/ || exit 1
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
