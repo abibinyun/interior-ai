@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import type { Generation } from '../api/generations';
 import { GENERATION_STATUS_LABEL, generationErrorTitle } from './generation-status';
 
@@ -6,6 +7,12 @@ export interface GenerationCardProps {
   isApproved: boolean;
   onApprove?: () => void;
   approving?: boolean;
+  /**
+   * When provided, renders a "Refine" link into the card footer
+   * that navigates to the generation detail page with the refinement
+   * modal pre-opened.
+   */
+  refineHref?: string;
 }
 
 /**
@@ -17,7 +24,7 @@ export interface GenerationCardProps {
  *  - FAILED → friendly error card with the documented code
  *  - isApproved → green "Approved" ribbon + no approve button
  */
-export function GenerationCard({ generation, isApproved, onApprove, approving }: GenerationCardProps) {
+export function GenerationCard({ generation, isApproved, onApprove, approving, refineHref }: GenerationCardProps) {
   if (generation.status === 'FAILED') {
     return (
       <article
@@ -68,18 +75,34 @@ export function GenerationCard({ generation, isApproved, onApprove, approving }:
           ) : null}
         </div>
         <footer className="flex items-center justify-between gap-2 px-4 py-3">
-          <span className="text-xs text-stone-500">Option {generation.optionIndex}</span>
-          {!isApproved ? (
-            <button
-              type="button"
-              onClick={onApprove}
-              disabled={approving}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-stone-900 px-3 py-1.5 text-xs font-medium text-cream-50 hover:bg-stone-700 disabled:opacity-50"
-              data-testid={`approve-button-${generation.optionIndex}`}
-            >
-              {approving ? 'Approving…' : 'Approve'}
-            </button>
-          ) : null}
+          <Link
+            to={`/generations/${generation.id}?roomId=${generation.roomId}`}
+            className="text-xs text-stone-500 hover:text-stone-900"
+          >
+            Option {generation.optionIndex} · details
+          </Link>
+          <div className="flex items-center gap-2">
+            {refineHref && !isApproved ? (
+              <Link
+                to={refineHref}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-stone-300 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-100"
+                data-testid={`refine-link-${generation.optionIndex}`}
+              >
+                Refine
+              </Link>
+            ) : null}
+            {!isApproved ? (
+              <button
+                type="button"
+                onClick={onApprove}
+                disabled={approving}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-stone-900 px-3 py-1.5 text-xs font-medium text-cream-50 hover:bg-stone-700 disabled:opacity-50"
+                data-testid={`approve-button-${generation.optionIndex}`}
+              >
+                {approving ? 'Approving…' : 'Approve'}
+              </button>
+            ) : null}
+          </div>
         </footer>
       </article>
     );

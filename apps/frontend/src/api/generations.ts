@@ -30,23 +30,49 @@ export interface BatchResponse {
   items: Generation[];
 }
 
+/**
+ * Compact lineage node — the backend returns only `id`,
+ * `optionIndex`, and `createdAt` to keep the payload small (the
+ * full Generation record would be re-fetched on demand by the UI).
+ */
 export interface LineageNode {
   id: string;
   optionIndex: number;
-  parentGenerationId: string | null;
-  status: GenerationStatus;
   createdAt: string;
 }
 
 export interface LineageResponse {
-  id: string;
+  root: LineageNode;
+  /**
+   * Ancestors ordered root→...→parent (excluding the root itself,
+   * which is returned separately). Empty for a root generation.
+   */
   ancestors: LineageNode[];
+  /**
+   * Descendants ordered child→...→leaf (excluding the queried
+   * generation itself). Empty for a leaf generation.
+   */
   descendants: LineageNode[];
+}
+
+/**
+ * Structured refinement fields, mirroring the backend's
+ * `RefinementsDto`. All fields are optional; empty strings are
+ * treated as "no change" by the server.
+ */
+export interface Refinements {
+  colors?: string;
+  objects?: string;
+  furniture?: string;
+  materials?: string;
+  lighting?: string;
+  layout?: string;
+  styleEmphasis?: string;
 }
 
 export interface CreateBatchInput {
   parentGenerationId?: string;
-  refinements?: Record<string, unknown>;
+  refinements?: Refinements;
 }
 
 export function createBatch(roomId: string, input: CreateBatchInput = {}): Promise<BatchResponse> {

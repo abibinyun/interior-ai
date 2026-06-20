@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { GenerationCard } from './GenerationCard';
 import { GENERATION_STATUS_LABEL, generationErrorTitle } from './generation-status';
@@ -24,6 +25,10 @@ function makeGen(overrides: Partial<Generation> = {}): Generation {
   };
 }
 
+function renderWithRouter(ui: React.ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
+
 describe('GENERATION_STATUS_LABEL', () => {
   it('has labels for every status', () => {
     expect(GENERATION_STATUS_LABEL.PENDING).toBeTruthy();
@@ -47,24 +52,24 @@ describe('generationErrorTitle', () => {
 
 describe('<GenerationCard />', () => {
   it('renders the image + Option N label when COMPLETED', () => {
-    render(<GenerationCard generation={makeGen()} isApproved={false} />);
+    renderWithRouter(<GenerationCard generation={makeGen()} isApproved={false} />);
     expect(screen.getByAltText('Generation 1')).toBeInTheDocument();
-    expect(screen.getByText('Option 1')).toBeInTheDocument();
+    expect(screen.getByText(/Option 1/)).toBeInTheDocument();
   });
 
   it('hides the Approve button when approved', () => {
-    render(<GenerationCard generation={makeGen({ id: 'g_a' })} isApproved={true} />);
+    renderWithRouter(<GenerationCard generation={makeGen({ id: 'g_a' })} isApproved={true} />);
     expect(screen.queryByTestId('approve-button-1')).not.toBeInTheDocument();
     expect(screen.getByText('✓ Approved')).toBeInTheDocument();
   });
 
   it('renders the Approve button when not approved', () => {
-    render(<GenerationCard generation={makeGen()} isApproved={false} />);
+    renderWithRouter(<GenerationCard generation={makeGen()} isApproved={false} />);
     expect(screen.getByTestId('approve-button-1')).toBeInTheDocument();
   });
 
   it('renders the friendly error title for FAILED rows', () => {
-    render(
+    renderWithRouter(
       <GenerationCard
         generation={makeGen({
           status: 'FAILED',
@@ -79,10 +84,22 @@ describe('<GenerationCard />', () => {
   });
 
   it('renders a pulsing skeleton for PENDING/PROCESSING rows', () => {
-    const { container } = render(
+    const { container } = renderWithRouter(
       <GenerationCard generation={makeGen({ status: 'PROCESSING', imageUrl: null })} isApproved={false} />,
     );
     expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
     expect(screen.getByText(GENERATION_STATUS_LABEL.PROCESSING)).toBeInTheDocument();
+  });
+
+  it('renders the Refine link when refineHref is provided', () => {
+    renderWithRouter(
+      <GenerationCard
+        generation={makeGen()}
+        isApproved={false}
+        refineHref={`/generations/g_1?roomId=r_1`}
+      />,
+    );
+    const link = screen.getByTestId('refine-link-1');
+    expect(link.getAttribute('href')).toBe('/generations/g_1?roomId=r_1');
   });
 });

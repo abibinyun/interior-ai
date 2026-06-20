@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../lib/error';
 import { ErrorState } from '../components/ErrorState';
 import { GenerationCard } from '../components/GenerationCard';
@@ -27,21 +27,34 @@ import {
  */
 export function GenerationsPage() {
   const { roomId } = useParams<{ roomId: string }>();
+  const [searchParams] = useSearchParams();
+  const requestedBatch = searchParams.get('batch');
   const room = useRoom(roomId);
   const list = useGenerationsByRoom(roomId);
   const createBatch = useCreateBatch(roomId ?? '');
   const approveGen = useApproveGeneration(roomId ?? '');
-  const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
+  const [activeBatchId, setActiveBatchId] = useState<string | null>(requestedBatch);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const batch = useBatchStatus(roomId, activeBatchId ?? undefined);
 
-  // Auto-pick the latest batch once generations load.
+  // Auto-pick the latest batch once generations load (unless the URL
+  // already requested a specific batch via ?batch=... — used after a
+  // refinement).
   useEffect(() => {
     if (!activeBatchId && list.data?.items.length) {
       const latest = list.data.items[0]!;
       setActiveBatchId(latest.batchId);
     }
-  }, [activeBatchId, list.data]);
+    // Once the requested batch loads, drop the ?batch=... param so the
+    // URL doesn't keep the refinement target after the user navigates
+    // away and back.
+    if (requestedBatch && activeBatchId === requestedBatch) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('batch');
+      window.history.replaceState({}, '', `?${next.toString()}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeBatchId, list.data, requestedBatch]);
 
   if (!roomId) return <p className="text-stone-500">No room id in the URL.</p>;
 
@@ -153,6 +166,7 @@ export function GenerationsPage() {
                 isApproved={isApproved}
                 {...(onApprove ? { onApprove } : {})}
                 {...(approvingId === g.id ? { approving: true } : {})}
+                refineHref={`/generations/${g.id}?roomId=${g.roomId}`}
               />
             );
           })}

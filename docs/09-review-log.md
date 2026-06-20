@@ -492,6 +492,49 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F5 Refinement UI
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: real `GenerationDetailPage` (lineage + Refine CTA), `<RefinementForm>` (7 fields → POST with `parentGenerationId` + `refinements`), `<LineageTree>` (collapsible chain + descendants), `useLineage` hook, Refine link on `<GenerationCard>`, fixed `LineageResponse`/`Refinements` types to match the backend, 4 new frontend tests.
+
+- Verification:
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors
+  - `npm run test --workspace=@interior/frontend` → **64/64 pass** (60 F1–F4 + 4 new F5)
+  - `npm run build --workspace=@interior/frontend` → Vite bundle (265 KB JS, gzip 79 KB; 19 KB CSS, gzip 4 KB)
+  - **End-to-end smoke** through Docker frontend proxy: create project → set style → add room → write brief → list generations all round-trip correctly
+
+- F5 deliverables:
+  - **`<RefinementForm>`** — 7 free-text fields (colors / objects / furniture / materials / lighting / layout / style emphasis), each maxLength 500. At least one field must be filled before submit. Posts to `POST /api/rooms/:id/generations` with `{ parentGenerationId, refinements }` (empty strings stripped). Per-field error rendering via `error.fields`. Calls `onCreated(batchId)` on success so the parent can navigate.
+  - **`<LineageTree>`** — renders the chain root → ... → current (each step a pill linking to `/generations/:id`), plus a "Refined into" sub-list when descendants exist. Each chain pill is highlighted when it matches the queried generation.
+  - **`GenerationDetailPage` (real)** — fetches the generation via `useRoom` + `useGenerationsByRoom` (the backend doesn't expose a direct GET /api/generations/:id, so we accept a `?roomId=` query param to know which room's list to scan). Shows image + status + lineage tree + Refine CTA + collapsible "Show prompt" panel. The Refine CTA opens a `<Modal>` with `<RefinementForm>`; on success it navigates to the generations page with `?batch=...` so the user immediately sees the new batch.
+  - **GenerationsPage update** — accepts `?batch=...` query param to deep-link a specific batch (used by the refinement redirect). Strips the param once the requested batch has loaded so the URL doesn't keep the target after navigation. The `GenerationCard` now renders a Refine link (only when the room isn't already approved).
+  - **`<GenerationCard>` Refine link** — new optional `refineHref` prop. When set + room not approved, renders an outlined "Refine" link next to the Approve button. Deep-links to the detail page.
+  - **`useLineage(generationId)`** — TanStack Query wrapper around `GET /api/generations/:id/lineage`. 30s `staleTime` (matches the global default).
+  - **API type fixes**:
+    - `LineageResponse` now has `{ root: LineageNode, ancestors: LineageNode[], descendants: LineageNode[] }` matching the backend's actual response.
+    - `LineageNode` now has only `{ id, optionIndex, createdAt }` (no longer carries `status` / `parentGenerationId`).
+    - New `Refinements` interface mirrors `RefinementsDto` (colors/objects/furniture/materials/lighting/layout/styleEmphasis) with all-optional strings.
+    - `CreateBatchInput.refinements` now uses `Refinements` instead of the loose `Record<string, unknown>`.
+  - **4 new tests**:
+    - `RefinementForm.test.tsx` (3) — all 7 fields render, submit button disabled until at least one field filled, enabled after fireEvent.change.
+    - `GenerationCard.test.tsx` (+1) — Refine link renders with correct href when `refineHref` provided.
+    - Plus the existing GenerationCard tests now wrap in `<MemoryRouter>` because the card uses `<Link>`.
+
+- Bugs found and fixed during F5 verification (lessons recorded):
+  - **`@typescript-eslint/consistent-type-imports` on `import(...)` type**: the BriefEditor test used `import('...')` inline for the `typeof` cast. Fix: hoist to a top-level `import type * as Foo from '...'`.
+  - **GenerationCard tests broke after adding `<Link>`**: tests need a `<MemoryRouter>` wrapper because the card now contains a Link. Fix: added `renderWithRouter` helper and applied it to all renders.
+  - **Controlled input didn't react to `dispatchEvent('input')`**: the RefinementForm test used `colors.value = '...'; colors.dispatchEvent(new Event('input'))` which doesn't fire React's `onChange`. Fix: use `fireEvent.change(colors, { target: { value: '...' } })`.
+  - **Unused `refineHref` in `GenerationCard`**: forgot to destructure the new prop. Fix: added to the component's signature.
+
+- Known limitations:
+  - The generation detail page requires a `?roomId=` query param because the backend doesn't expose a direct GET /api/generations/:id. For F8 (References UX) we may add a backend endpoint to fetch by id, eliminating the URL hack.
+  - The "compare to parent" view (the spec's "parent image vs new option") is not yet implemented; the lineage tree shows the chain visually but does not show two images side by side. Future polish (F11).
+  - No "regenerate from this step" action on intermediate chain nodes — clicking a node just navigates to its detail page. F11 can add this.
+
+---
+
 ### 2026-06-20 — F4 Generation UI
 
 - Reviewer: Project Owner (self)

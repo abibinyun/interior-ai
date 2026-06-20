@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { BriefEditor } from './BriefEditor';
+import type * as RoomBriefHookModule from '../hooks/useRoomBrief';
 import type { Room } from '../api/rooms';
 
 function makeRoom(overrides: Partial<Room> = {}): Room {
@@ -19,7 +20,7 @@ function makeRoom(overrides: Partial<Room> = {}): Room {
 
 // Mock the useUpdateBrief hook to avoid wiring QueryClient here.
 vi.mock('../hooks/useRoomBrief', async () => {
-  const actual = await vi.importActual<typeof import('../hooks/useRoomBrief')>('../hooks/useRoomBrief');
+  const actual = await vi.importActual<typeof RoomBriefHookModule>('../hooks/useRoomBrief');
   return {
     ...actual,
     useUpdateBrief: () => ({
