@@ -52,7 +52,7 @@ export function AppShell() {
       <footer className="border-t border-stone-100 bg-white/50">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-6 text-xs text-stone-400">
           <span>Interior AI — interior design, end to end.</span>
-          <span className="font-mono text-stone-300">v0.9 — F1–F9</span>
+          <span className="font-mono text-stone-300">v0.10 — F1–F10</span>
         </div>
       </footer>
     </div>

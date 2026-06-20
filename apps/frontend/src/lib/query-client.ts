@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { ApiError } from './error';
+import { handle401 } from './session-recovery';
 
 /**
  * Singleton TanStack QueryClient with conservative defaults tuned for
@@ -13,6 +14,9 @@ import { ApiError } from './error';
  *   errors (the server's fault, a transient blip may resolve).
  * - `refetchOnWindowFocus: false` — refetching when the user tabs back
  *   is jarring in a design app where the data barely changes.
+ * - 401 → schedule a one-shot full-page reload so the backend's
+ *   always-issue-on-missing `GET /api/session` re-establishes the
+ *   session cookie transparently (F10 hardening).
  */
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,4 +37,20 @@ export const queryClient = new QueryClient({
       retry: false,
     },
   },
+});
+
+// Wire the 401 recovery hook. QueryClient has no native "global
+// error handler", so we hang `handle401` off `setMutationDefaults`
+// via a per-mutation wrapper is overkill; the simplest reliable
+// path is a tiny `queryCache` + `mutationCache` subscription that
+// runs after every query/mutation settles.
+queryClient.getQueryCache().subscribe((event) => {
+  if (event.type === 'updated' && event.action?.type === 'error' && event.query.state.error) {
+    handle401(event.query.state.error);
+  }
+});
+queryClient.getMutationCache().subscribe((event) => {
+  if (event.type === 'updated' && event.action?.type === 'error' && event.mutation.state.error) {
+    handle401(event.mutation.state.error);
+  }
 });

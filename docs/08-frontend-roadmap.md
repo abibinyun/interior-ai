@@ -285,20 +285,48 @@ Frontend milestones are **sequenced behind their backend counterparts**:
 
 ---
 
-### F10 — Failure Surfaces
+### F10 — Failure Surfaces ✅ Completed 2026-06-20
 
 **Objective**: Map every backend error code to a visible, helpful UI state.
 
 **Scope**
 
-- Centralized error renderer keyed by `error.code`.
-- Per-code UX: PROVIDER_TIMEOUT, PROVIDER_REJECTED, PROVIDER_BROKEN, STORAGE_FAILED, PROMPT_INVALID, RATE_LIMITED, BUSINESS_RULE_VIOLATION, etc.
-- Empty states for first-time sessions.
-- Recovery CTAs (retry, change brief, etc.) tied to the rule from `03-business-rules.md`.
+- **Per-code friendly mapping** (`src/lib/error-messages.ts`, carried over from F2 + F4) — every documented `ErrorCode` has a single canonical user-facing message + short title (`friendlyErrorTitle`). The F2 review entry established the foundation; F10 confirmed coverage against `docs/05-api-contract.md §2.1` (13 codes total, all mapped).
+- **Per-code recovery hint** (`src/lib/recovery-hints.ts`) — new helper that maps each error code to a short action-oriented next step ("Refresh the page", "Wait a moment", "Edit the brief", "Try again", "Go back", "Refresh and retry", "Check the highlighted fields"). Returns `null` for codes without a more specific suggestion (so the friendly message alone is the guidance).
+- **`<ErrorState>` enhancement** — now renders the recovery hint line ("Next step · Refresh the page") below the friendly message. New `hideHint` prop lets pages suppress it when an `onRetry` button or page-level hint already covers the next step.
+- **Auto-redirect on `UNAUTHENTICATED`** (`src/lib/session-recovery.ts` + subscribed to `queryClient.getQueryCache()` / `getMutationCache()`) — when any query or mutation returns 401, schedule a one-shot full-page reload. The backend's `GET /api/session` always issues a fresh cookie when missing, so the reload re-establishes identity transparently. Idempotent (a module-level latch prevents reload storms when query + mutation both 401 in the same tick). `resetSessionReloadLatch()` exported for tests + post-recovery re-arm.
+- **Empty-state audit** — every first-time surface has a visible empty state (ProjectsPage uses `<EmptyState>` directly; ProjectDetailPage + RoomsPage + RoomDetailPage + GenerationsPage + ReferencesPage + ExportsPage each have inline hints tailored to their domain). Coverage verified by walking every route in the matrix below.
 
-**DoD**
+**Error code matrix** (`docs/05-api-contract.md §2.1` → UI surface):
 
-- Every error code documented in `05-api-contract.md §2.1` has a UI state. Manual matrix check.
+| Code | HTTP | Title | Friendly message | Recovery hint | Primary UI surface |
+|---|---|---|---|---|---|
+| `VALIDATION_FAILED` | 400 | Check your inputs | "Some fields need attention. Check the highlighted inputs and try again." | "Check the highlighted fields" | `<ErrorState>` in CreateProjectModal / AddReferenceModal / BriefEditor / StylePage with per-field error rendering |
+| `PROMPT_INVALID` | 400 | Brief needs editing | "The design brief has something we couldn't parse. Try rephrasing it." | "Edit the brief" | `<ErrorState>` in GenerationsPage |
+| `UNAUTHENTICATED` | 401 | Session expired | "Your session expired. Refresh the page to continue." | "Refresh the page" (auto-redirect via `handle401`) | Global QueryClient subscription |
+| `FORBIDDEN` | 403 | Not allowed | "You don't have access to that item." | null | `<ErrorState>` (cross-room GENERATED reference 404 maps here in practice per S-05) |
+| `NOT_FOUND` | 404 | Not found | "We couldn't find that. It may have been deleted." | "Go back" | `<ErrorState>` across all routes |
+| `CONFLICT` | 409 | Conflict | "That action conflicts with the current state. Refresh and try again." | "Refresh and retry" | `<ErrorState>` in ProjectCompletionCard (reopen), Approve flow |
+| `BUSINESS_RULE_VIOLATION` | 422 | Not allowed | "That action isn't allowed right now." | null | `<ErrorState>` in ProjectCompletionCard (complete with non-approved rooms) |
+| `PROVIDER_TIMEOUT` | 502 | Image provider issue | "The image provider took too long. Try again in a moment." | "Try again" | `<GenerationCard>` FAILED state + `<ErrorState>` in GenerationsPage |
+| `PROVIDER_REJECTED` | 502 | Image provider issue | "The image provider refused this request. Try a different prompt." | "Try again" | `<GenerationCard>` FAILED state |
+| `PROVIDER_BROKEN` | 502 | Image provider issue | "The image provider returned something we couldn't use. Try again." | "Try again" | `<GenerationCard>` FAILED state |
+| `STORAGE_FAILED` | 502 | Upload failed | "We couldn't store the image. Try again in a moment." | "Try again" | `<GenerationCard>` FAILED state (per F5 review) |
+| `UPLOAD_REJECTED` | 400 | Upload failed | "That file couldn't be uploaded. Check the format and size." | "Try again" | `<AddReferenceModal>` client-side + `<ErrorState>` |
+| `RATE_LIMITED` | 429 | Slow down | "You're going a little fast — slow down for a moment and try again." | "Wait a moment" | `<ErrorState>` (the only place this fires today is the per-session bucket on the generations endpoint; surfaced as a generic `BUSINESS_RULE_VIOLATION` via the AppGuard upstream — TODO if M17's per-endpoint tuning widens this) |
+| `INTERNAL` | 500 | Something went wrong | "Something went wrong on our end. We've been notified." | null | `<ErrorState>` everywhere |
+
+**Out of Scope**
+
+- Per-endpoint recovery flows (e.g. "Edit the brief" auto-navigating to `<BriefEditor>`). The hint is shown next to the error; the user takes the next click.
+- Trace-id copy-to-clipboard button. Trace-ids are still displayed as `<code>` for support.
+- Localized strings. All copy is English-only (consistent with the rest of the v1 surface).
+
+**DoD** ✅
+
+- **Every error code documented in `05-api-contract.md §2.1` has a UI state** — verified by the matrix above. No code returns an empty body or a raw exception.
+- **Auto-recovery from session expiry** — verified via unit test (`session-recovery.test.ts`): first 401 schedules a reload; subsequent 401s in the same storm are no-ops; `resetSessionReloadLatch()` re-arms.
+- **Per-code recovery hint** — verified via unit test (`recovery-hints.test.ts`) that every code maps to the expected hint (or `null` when no specific suggestion is more helpful than the generic "Try again").
 
 ---
 

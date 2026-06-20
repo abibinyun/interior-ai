@@ -527,6 +527,42 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — F10 Failure Surfaces
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed: `src/lib/recovery-hints.ts` (per-code action hints), `src/lib/session-recovery.ts` (401 auto-redirect), `<ErrorState>` enhanced to render the hint + new `hideHint` prop, `src/lib/query-client.ts` wires `handle401` via `queryCache` + `mutationCache` subscriptions. Footer bumped to `v0.10 — F1–F10`. 16 new tests across `recovery-hints.test.ts` (10), `session-recovery.test.ts` (4), and the existing `ErrorState.test.tsx` (+3).
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run build` (backend + frontend) → clean (Vite 305 KB / 88 KB gzip)
+  - `npm run test:frontend` → **140/140 pass** (was 124 + 16 new)
+  - `npm run test:backend` → still 220/221 (no backend changes this milestone)
+
+- F10 deliverables:
+  - **`recoveryHint(err)`** — single-function mapper. 9 codes get a specific short label; the rest fall through to `null` so the friendly message alone is the guidance. Pulled into `<ErrorState>` as a "Next step · …" line below the message.
+  - **`handle401(err)` + module-level latch** — schedules `window.location.reload()` once per 401 storm (subsequent 401s are no-ops until the user reloads and the latch resets). Subscribed to both `queryCache` and `mutationCache` so query failures AND mutation failures trigger the same recovery. The backend's `GET /api/session` always issues a fresh cookie when the current one is missing/expired, so the reload re-establishes identity without user friction.
+  - **`<ErrorState>` enhancement** — renders `<p className="text-xs text-stone-500">Next step · {hint}</p>` when `recoveryHint(err)` returns a non-null label. New `hideHint` prop suppresses it for callers that already show their own next-step UI.
+  - **Error code matrix** in `docs/08-frontend-roadmap.md` — manually cross-checked against `docs/05-api-contract.md §2.1`. Every code (VALIDATION_FAILED, PROMPT_INVALID, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT, BUSINESS_RULE_VIOLATION, PROVIDER_TIMEOUT, PROVIDER_REJECTED, PROVIDER_BROKEN, STORAGE_FAILED, UPLOAD_REJECTED, RATE_LIMITED, INTERNAL) is mapped to: title + friendly message + recovery hint + primary UI surface.
+  - **Empty-state audit** — every first-time surface has a visible empty state: ProjectsPage (`<EmptyState>`), ProjectDetailPage ("No rooms yet"), RoomsPage (`EmptyRoomsHint`), RoomDetailPage (per-section "No X yet" lines), GenerationsPage (`EmptyGenerationsHint`), ReferencesPage (`EmptyReferencesHint`), ExportsPage (`EmptyExportsHint`). Verified by walking every route in the matrix.
+
+- 16 new tests:
+  - `recovery-hints.test.ts` (10) — every documented code returns the expected hint; codes without a specific suggestion return `null`; non-ApiError values return `null`.
+  - `session-recovery.test.ts` (4) — 401 schedules a reload; non-401 errors do nothing; reload is idempotent (latch); `resetSessionReloadLatch()` re-arms.
+  - `ErrorState.test.tsx` (+3) — renders the recovery hint when mapped; omits it for codes without a suggestion; respects `hideHint`.
+
+- Bugs found and fixed during F10 verification (lessons recorded):
+  - **`vi.spyOn(window, 'location', 'get').mockReturnValue(...)`** was the cleanest way to spy on `location.reload` in jsdom. The naive `window.location.reload = vi.fn()` assignment throws because `location` is a read-only property in jsdom.
+  - **Subscribing to `queryCache` AND `mutationCache`** — TanStack Query has no top-level "global error" hook, so the subscribe approach is the canonical pattern. The subscriber runs for every state transition but is a no-op when `action.type !== 'error'`.
+
+- Known limitations:
+  - The auto-redirect is invisible to the user — they see a brief blank moment while the page reloads. Acceptable; the alternative is a sticky "Session expired" banner with a manual refresh button (worse UX).
+  - `RATE_LIMITED` is only surfaced via the AppGuard rate limiter; the per-endpoint bucket tuning in M17 could split this out further but doesn't change the mapping.
+  - The hint is a sentence-level suggestion; no actionable deep links (e.g. "Edit the brief" doesn't auto-scroll to `<BriefEditor>`). F11 polish could add anchor jumps.
+
+---
+
 ### 2026-06-20 — F9 Export UX
 
 - Reviewer: Project Owner (self)

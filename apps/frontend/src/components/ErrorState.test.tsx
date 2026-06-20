@@ -35,4 +35,20 @@ describe('<ErrorState />', () => {
     render(<ErrorState error={new ApiError(404, 'NOT_FOUND')} title="Custom heading" />);
     expect(screen.getByRole('heading', { level: 2, name: 'Custom heading' })).toBeInTheDocument();
   });
+
+  it('renders the per-code recovery hint when one is mapped', () => {
+    render(<ErrorState error={new ApiError(404, 'NOT_FOUND')} />);
+    expect(screen.getByText(/Next step/i)).toBeInTheDocument();
+    expect(screen.getByText(/Go back/i)).toBeInTheDocument();
+  });
+
+  it('omits the recovery hint when the code has no suggestion', () => {
+    render(<ErrorState error={new ApiError(422, 'BUSINESS_RULE_VIOLATION')} />);
+    expect(screen.queryByText(/Next step/i)).not.toBeInTheDocument();
+  });
+
+  it('respects hideHint', () => {
+    render(<ErrorState error={new ApiError(404, 'NOT_FOUND')} hideHint />);
+    expect(screen.queryByText(/Next step/i)).not.toBeInTheDocument();
+  });
 });
