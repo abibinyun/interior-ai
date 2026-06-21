@@ -40,8 +40,7 @@ async function bootstrap(): Promise<void> {
   // empty / wildcard CORS_ORIGINS is rejected at bootstrap.
   const allowedOrigins = corsOriginsList(env.CORS_ORIGINS);
   if (isProd && allowedOrigins.length === 0) {
-    // eslint-disable-next-line no-console
-    console.error('FATAL: CORS_ORIGINS must be set in production.');
+    app.get(Logger).error('FATAL: CORS_ORIGINS must be set in production.');
     process.exit(1);
   }
   app.enableCors({

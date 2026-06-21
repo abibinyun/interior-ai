@@ -110,23 +110,53 @@ export class AiHordeAdapter implements AiProviderAdapter {
   // -------------------------------------------------------------------------
 
   private async submit(request: GenerationRequest): Promise<string> {
-    // 30s deadline for submit + one retry with backoff. The overall
-    // generation timeout (hardTimeoutMs) covers the whole generate()
+    // 30s deadline for submit + retries with backoff. The overall
+    // generation timeout (hardTimeoutMs) covers the full generate()
     // lifecycle; this is just for the submit step.
     const deadline = Date.now() + 30_000;
+    let attempt = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      attempt += 1;
+      const result = await this.trySubmitOnce(request);
+      if (result.ok) return result.id;
+      if (result.status !== 429) {
+        throw this.makeHttpError(result.status, 'submit', result.responseRef);
+      }
+      // 429 — back off and retry. Floor at 5 s.
+      const retryAfterRaw = result.responseRef.headers['retry-after'];
+      const retryAfterSec = retryAfterRaw
+        ? Math.max(5, Number(retryAfterRaw) || 5)
+        : 5;
+      if (Date.now() + retryAfterSec * 1000 >= deadline) {
+        throw this.makeHttpError(429, 'submit', result.responseRef);
+      }
+      this.logger.warn(
+        { attempt, retryAfterSec, deadlineRemainingSec: Math.ceil((deadline - Date.now()) / 1000) },
+        'AI Horde submit rate-limited; backing off',
+      );
+      await this.sleep(retryAfterSec * 1000);
+    }
+  }
+
+  /**
+   * Single submit attempt. Returns `{ ok: true, id }` on 2xx with
+   * a valid id, or `{ ok: false, status }` on any error that the
+   * caller should decide whether to retry.
+   */
+  private async trySubmitOnce(
+    request: GenerationRequest,
+  ): Promise<
+    | { ok: true; id: string }
+    | { ok: false; status: number; responseRef: Awaited<ReturnType<HttpFetcher['fetch']>> }
+  > {
     const url = `${this.baseUrl}/v2/generate/async`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     };
-    if (this.apiKey) {
-      // AI Horde uses a custom `apikey` header, NOT Authorization Bearer.
-      headers['apikey'] = this.apiKey;
-    }
+    if (this.apiKey) headers['apikey'] = this.apiKey;
 
-    // AI Horde accepts `width` / `height` / `steps` / `cfg_scale` /
-    // `sampler` under a `params` sub-object. We forward only the
-    // fields the rest of the pipeline already populates.
     const params: Record<string, unknown> = {};
     if (request.width) params['width'] = request.width;
     if (request.height) params['height'] = request.height;
@@ -156,24 +186,7 @@ export class AiHordeAdapter implements AiProviderAdapter {
     clearTimeout(timeout);
 
     if (response.status >= 400) {
-      // 429 on submit is transient — back off and retry.
-      // Same pattern as the poll loop retry. The `Retry-After`
-      // header tells us how long; floor at 5 s.
-      if (response.status === 429) {
-        const retryAfterRaw = response.headers['retry-after'];
-        const retryAfterSec = retryAfterRaw
-          ? Math.max(5, Number(retryAfterRaw) || 5)
-          : 5;
-        if (Date.now() + retryAfterSec * 1000 < deadline) {
-          this.logger.warn(
-            { retryAfterSec },
-            'AI Horde submit rate-limited; backing off',
-          );
-          await this.sleep(retryAfterSec * 1000);
-          return this.submit(request);
-        }
-      }
-      throw this.makeHttpError(response.status, 'submit', response);
+      return { ok: false, status: response.status, responseRef: response };
     }
 
     const text = (await response.body()).toString('utf-8');
@@ -186,7 +199,7 @@ export class AiHordeAdapter implements AiProviderAdapter {
     if (typeof parsed.id !== 'string' || parsed.id.length === 0) {
       throw this.makeProviderBrokenError('AI Horde submit response missing id', parsed);
     }
-    return parsed.id;
+    return { ok: true, id: parsed.id };
   }
 
   // -------------------------------------------------------------------------

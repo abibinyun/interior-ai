@@ -65,11 +65,21 @@ export const RATE_LIMIT_HEADERS = {
 @Injectable()
 export class RateLimitGuard implements CanActivate {
   private readonly logger = new Logger(RateLimitGuard.name);
+  /** Minimum bucket reset time in seconds (prevents zero-division in header math). */
+  private static readonly MIN_RESET_SECONDS = 1;
+  /** Prune expired buckets every 60s to prevent unbounded Map growth. */
+  private static readonly CLEANUP_INTERVAL_MS = 60_000;
   private readonly buckets = new Map<string, BucketEntry>();
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     @Inject(RATE_LIMIT_CONFIG) private readonly options: RateLimitOptions,
-  ) {}
+  ) {
+    this.cleanupTimer = setInterval(() => this.pruneExpired(), RateLimitGuard.CLEANUP_INTERVAL_MS);
+    // Let Node exit even if the timer is still running (otherwise
+    // the process hangs on SIGTERM).
+    if (this.cleanupTimer.unref) this.cleanupTimer.unref();
+  }
 
   canActivate(execContext: ExecutionContext): boolean {
     const req = execContext.switchToHttp().getRequest<Request>();
@@ -136,11 +146,17 @@ export class RateLimitGuard implements CanActivate {
     const now = Date.now();
     const entry = this.buckets.get(key);
     if (!entry || entry.resetAt <= now) {
-      const resetInSeconds = Math.max(1, Math.ceil(this.options.windowMs / 1000));
+      const resetInSeconds = Math.max(
+        RateLimitGuard.MIN_RESET_SECONDS,
+        Math.ceil(this.options.windowMs / 1000),
+      );
       this.buckets.set(key, { resetAt: now + this.options.windowMs, count: 1 });
       return { overLimit: false, remaining: this.options.max - 1, resetInSeconds };
     }
-    const resetInSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    const resetInSeconds = Math.max(
+      RateLimitGuard.MIN_RESET_SECONDS,
+      Math.ceil((entry.resetAt - now) / 1000),
+    );
     if (entry.count >= this.options.max) {
       return { overLimit: true, remaining: 0, resetInSeconds };
     }
@@ -150,6 +166,21 @@ export class RateLimitGuard implements CanActivate {
       remaining: Math.max(0, this.options.max - entry.count),
       resetInSeconds,
     };
+  }
+
+  /**
+   * Removes expired bucket entries from the Map. Called every
+   * `CLEANUP_INTERVAL_MS`. Without this, the Map grows
+   * unbounded as sessions expire — stale entries are detected
+   * on access but never garbage-collected.
+   */
+  private pruneExpired(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.buckets) {
+      if (entry.resetAt <= now) {
+        this.buckets.delete(key);
+      }
+    }
   }
 
   private setAdvisoryHeaders(res: Response, decision: ReturnType<RateLimitGuard['tryConsume']>): void {
