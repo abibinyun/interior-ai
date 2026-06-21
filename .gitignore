@@ -51,6 +51,7 @@ test-report.xml
 session.json
 session-*.md
 session-*.jsonl
+opencode.json
 
 # test screenshots (local artifacts; never commit)
 *.screenshot.png
