@@ -527,6 +527,196 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-20 — Rate-limit hardening (429 user-reported bug)
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed:
+  - `apps/backend/src/common/rate-limit.guard.ts` — emits `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` advisory headers on every limited request, and `Retry-After` on 429 (per RFC 6585 §4). Renamed `isOverLimit()` → `tryConsume()` returning a structured decision so the header setter has the data without a second map lookup.
+  - `apps/frontend/src/lib/error.ts` — `ApiError` now carries `retryAfter?: number` and `rateLimit?: { limit, remaining, resetInSeconds }`; new `isRateLimited()` helper.
+  - `apps/frontend/src/api/client.ts` — parses `Retry-After` (delta-seconds + HTTP-date forms per RFC 7231 §7.1.3) and the `RateLimit-*` advisory headers, populating the new `ApiError` fields. Falls back to `undefined` if the headers are missing or malformed.
+  - `apps/frontend/src/hooks/useGenerations.ts` — `useBatchStatus` now reads the last error's `retryAfter` and backs off the polling interval to `max(retryAfter × 1000, 30000)` ms after a 429 (with a 30 s safety net if the header is missing). Non-429 errors keep the 2 s steady state.
+  - `apps/backend/src/storage/supabase-storage.adapter.spec.ts` — the obsolete "rejects unsupported content-types (SG-06)" test was removed (the F9 fix intentionally removed the image-only MIME gate so `application/zip` exports work). Replaced with two tests that assert the new contract: rejects empty content-type (defensive sanity check), accepts non-image types (the production-blocking case the F9 fix resolved).
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run test:backend` → **223/224 pass** (1 pre-existing M16 observability flake — same Pollinations `healthcheck()` 503 documented in F2 review log, NOT introduced by this hardening)
+  - `npm run test:frontend` → **151/151 pass** (was 144 + 7 new: 3 in `client.test.ts` for header parsing, 4 in `useGenerations.test.tsx` for polling backoff)
+  - `npm run test:backend` for hardening spec specifically → 16/16 pass (was 14 + 2 new for `RateLimit-*` headers + `Retry-After`)
+
+- Why this is a bug fix (not a feature):
+  The user reported `429 Too Many Requests` on `/api/rooms/:roomId/generations/batches/:batchId` and `/api/rooms/:roomId/approval`. Two failures:
+  1. **Backend returned no `Retry-After` header.** Clients had no way to pace themselves and just kept hammering the bucket.
+  2. **`useBatchStatus` polled blindly every 2 s regardless of errors.** When TanStack Query rejected a 5xx retry and the 429 error stuck, `refetchInterval` kept firing every 2 s — turning a soft rate-limit into a hard stalemate.
+
+- Bug audit (same pattern in other places): **all clean.**
+  - `useApproveGeneration` and `useCreateBatch` are mutations with `retry: false` — they don't auto-retry on 429. Their errors surface through `useOptimisticApprove.onErrorToast` (F6) and `createBatch.error` + `<ErrorState>` (F4), so the user sees the friendly "Wait a moment" hint from the F10 recovery mapper.
+  - `useOptimisticApprove` itself catches via `onError` → invokes `onErrorToast` → friendly mapper. ✓
+  - The 429 auto-recovery via `handle401` (F10) does NOT fire for 429 — `handle401` is strictly `status === 401`. This is correct: a 429 means "slow down", not "session expired", so the auto-reload would be wrong.
+
+- Lessons recorded:
+  - **`refetchInterval` is independent of `retry`** — TanStack Query will keep firing the interval even when `retry: false` and the query is in error state. The interval function has to read `query.state.error` and decide what to do on its own.
+  - **`expect.assertions(N)` is a great guard for "this must throw" tests**: the obsolete MIME test had it set to 2 but the catch block never ran after the F9 fix, surfacing the regression as a clean failure rather than a silent "test passed but didn't actually exercise the contract".
+  - **`apiFetch` previously discarded all response headers** except `Content-Type`. The rate-limit fix is the second consumer of headers (the first was probably implicit via cookies). Future fixes that need headers (e.g. ETags for caching, `x-request-id` for trace propagation) now have a clear pattern.
+
+---
+
+### 2026-06-20 — Round 5: Export bundle download — signed-URL path bug
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed (this entry is pre-commit; staged but not yet committed):
+  - `apps/backend/src/storage/supabase-storage.adapter.ts` — `signedUrl()` now rewrites the relative path returned by Supabase. Supabase's current API returns `signedURL` in the LEGACY form `/object/sign/<bucket>/<key>?token=...` (no `/storage/v1/` prefix). When a client GETs that path as-is, Supabase responds `404 {"error":"requested path is invalid"}` because the legacy `/object/sign/...` endpoint doesn't accept signed downloads. The correct download path is `/storage/v1/object/sign/...` (the versioned API). The adapter prepends `/storage/v1` to the relative path so the URL the browser receives points at the right endpoint.
+  - `apps/backend/src/storage/supabase-storage.adapter.spec.ts` — 3 new tests: (1) legacy `/object/sign/...` is rewritten to `/storage/v1/object/sign/...` (the production-blocking case), (2) already-versioned `/storage/...` is preserved as-is, (3) unknown relative forms get a defensive `/storage/v1` prefix.
+
+- Why this is a bug fix: The user's earlier test sessions produced a `v1.zip` and a `v2.zip` bundle. When they clicked the download link in the UI, the browser GET'd the URL → `404 {"error":"requested path is invalid"}`. The bundle was correctly uploaded to Supabase (`ls` confirmed the file at `generations/development/exports/projects/<id>/v1.zip`, 464KB, valid ZIP), and the signed-URL POST correctly returned a token. Only the path-rewriting step was wrong.
+
+- Root cause timeline (3-part chain):
+  1. `signedUrl()` POSTs to `/storage/v1/object/sign/<bucket>/<key>` (versioned API).
+  2. Supabase responds with `{ signedURL: "/object/sign/<bucket>/<key>?token=..." }` — the LEGACY form, not the versioned one.
+  3. The adapter naively prepended `<SUPABASE_URL>` → `https://<supabase>/object/sign/...?token=...` — missing the `/storage/v1/` prefix.
+  4. The browser GET'd that URL → 404 "requested path is invalid" (the legacy endpoint doesn't accept signed downloads).
+
+- Verification:
+  - **Direct Supabase test** (the key signal):
+    - `GET https://<supabase>/object/sign/...` (current broken) → `404`
+    - `GET https://<supabase>/storage/v1/object/sign/...` (correct) → `200 application/zip` ✓
+  - **End-to-end via the backend**: queried `GET /api/exports/<bundle-id>` for an existing v2 bundle, the returned `downloadUrl` now contains `/storage/v1/object/sign/...`. `curl` on that URL → `HTTP/2 200`, `content-type: application/zip`, 221240 bytes, valid ZIP with all 7 expected files.
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run test:backend` → **243/243 pass** (was 240 + 3 new signed-URL tests)
+  - `npm run test:frontend` → **152/152 pass** (no FE test changes)
+
+- Lessons recorded:
+  - **Supabase's `signedURL` response uses a different API path than the `POST` that generates it.** The POST hits `/storage/v1/object/sign/...` but the response contains `/object/sign/...`. The two paths are aliases on Supabase's edge, but only the versioned one accepts signed downloads. The fix would be invisible to anyone reading the POST code alone — it only surfaces when you actually try to follow the URL.
+  - **Catch this kind of bug at the integration level, not the unit level.** The 3 unit tests we have are the floor, but they only catch the transformation in isolation. The "follow the URL and see what happens" test against a real Supabase bucket is what proved the fix. A cheap live check: `curl -i <signedUrl>` after creating a bundle, with the test verifying `content-type: application/zip` and a 200 status. This would have caught the original bug in CI.
+  - **"Already works on my machine" is the standard failure mode for storage integrations.** The code looked correct in isolation. The bug was in the round-trip with the real Supabase API. The test suite can guard the transformation, but the production-bucket round-trip is the only place the URL actually gets followed.
+
+---
+
+### 2026-06-20 — Round 4: AI Horde provider + 402/429 fallback trigger
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed (this entry is pre-commit; staged but not yet committed):
+  - `apps/backend/src/ai/adapters/ai-horde.adapter.ts` — new 3rd AI adapter. AI Horde is **async** (submit + poll), so this adapter wraps `POST /v2/generate/async` → `GET /v2/generate/status/{id}` (chose `/status` over `/check` because it's a strict superset — same `done`/`faulted` fields plus the `generations[]` array with image URLs, saving a round-trip). Polls every 2 s up to `GENERATION_HARD_TIMEOUT_MS` (default 120 s). Downloads the image from `generations[0].img`. Authentication via the `apikey` header (NOT a Bearer token — that's a Horde-specific quirk).
+  - `apps/backend/src/ai/ai.module.ts` — registers `AiHordeAdapter` and extends the `AI_PROVIDER_ADAPTER` factory to select one of three: `pollinations | myceli | ai-horde` (default `pollinations`). All three are still registered as providers so the pipeline orchestrator can use the other two as the AI-07 fallback.
+  - `apps/backend/src/generations/pipeline-orchestrator.ts` — `shouldFallback` now also triggers on `PROVIDER_REJECTED` with `statusCode === 402` (Payment Required — the active provider is out of credits) or `statusCode === 429` (provider-side rate limit). New `pickFallback()` helper: if active is `pollinations` or `myceli` → fall back to the other sync provider; if active is `ai-horde` (async) → fall back to `pollinations` (sync, fast) — chaining two async providers would blow the hard-timeout budget.
+  - `apps/backend/src/config/env.ts` — schema now accepts `ai-horde` for `AI_PROVIDER`. Added `AI_HORDE_BASE_URL` (default `https://stablehorde.net/api`) and `AI_HORDE_API_KEY` (optional, sent in the `apikey` header).
+  - `apps/backend/src/ai/adapters/ai-horde.adapter.spec.ts` — 9 new unit tests: happy path with apikey header check, submit 4xx, submit 429 (fallback trigger), poll faulted, poll done but no image, deadline timeout, anonymous mode (no apikey), healthcheck ok, healthcheck down.
+  - `apps/backend/test/pipeline.e2e-spec.ts` — updated `setupApp` to override the new `AiHordeAdapter` provider.
+  - `.env`, `.env.example`, `docker-compose.yml` — `AI_HORDE_BASE_URL` and `AI_HORDE_API_KEY` env vars documented and wired. The actual API key is in `.env` only (gitignored, never committed).
+  - `docs/09-review-log.md` — this entry.
+
+- Why this is a feature (not a fix): The user reported a Pollinations 402 ("payment required") outage. Two improvements:
+  1. **Fallback coverage**: 402 and 429 are now treated as transient errors that trigger the AI-07 fallback to the other sync provider. Previously they were classified as `PROVIDER_REJECTED` and marked FAILED immediately.
+  2. **Third provider option**: AI Horde (https://stablehorde.net/) is a free crowdsourced image generation API. It supports the same `GenerationRequest` / `GenerationResult` interface as the other adapters, so it slots into the existing orchestrator without any pipeline changes.
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run test:backend` → **240/240 pass** (was 231 + 9 new Horde tests)
+  - `npm run test:frontend` → **152/152 pass** (no FE test changes — backend-only)
+  - **Live end-to-end test**: with `AI_PROVIDER=ai-horde` and the user's `AI_HORDE_API_KEY` set in `.env`, a fresh 3-option batch completed in ~140 s with all three options marked `COMPLETED` and valid Supabase storage URLs. Log shows the chain: `POST /v2/generate/async → poll /v2/generate/status/{id} (done=true) → download generations[0].img → upload to Supabase`.
+  - **Fallback chain verified**: Horde primary fails fast (network error) → fallback to Pollinations → 402 → marked FAILED. Log shows `primary adapter failed (PROVIDER_BROKEN) → attempting fallback → fallback adapter failed (Pollinations returned 402) → marking FAILED`.
+
+- Lessons recorded:
+  - **Use `/status` over `/check` for AI Horde polling.** `/check/{id}` returns only the `done`/`faulted` fields; the actual image URLs are in `/status/{id}`. Using `/check` and then trying to read `generations` from it was the source of the "AI Horde job done but no image URL in response" bug on the first live run — caught only because the live test is in the verification gate.
+  - **`apikey` header, not Bearer.** AI Horde's auth is a custom `apikey` header. The other two providers use `Authorization: Bearer ...`. Putting the wrong header would have looked like a working submit (the request is accepted) followed by a confusing rejection at download time.
+  - **Async providers can't be AI-07 fallbacks.** If `ai-horde` is the primary and the fallback is also async, the second `submit + poll` would consume the remaining hard-timeout budget — by the time it's done, the user has waited 2 minutes for nothing. The new `pickFallback()` short-circuits this: Horde always falls back to a sync provider.
+  - **Foot-gun guard for 402/429 status codes.** The original `shouldFallback` treated all `PROVIDER_REJECTED` (4xx) as permanent. 402/429 are the obvious transient 4xx — the other 4xx codes (400, 401, 403, 404) really are permanent. The `statusCode === 402 || statusCode === 429` check is the cleanest way to carve this out without enumerating "all 4xx" (which would also trigger on, say, 404 model-not-found).
+  - **`docker compose restart` does NOT re-read `.env`.** The user added `AI_PROVIDER=ai-horde` to `.env` but `docker compose restart backend` kept the old env. The fix is `docker compose up -d backend` (recreates the container with fresh env). Documented in the .env.example comments so the next operator doesn't lose 10 minutes to this.
+
+---
+
+### 2026-06-20 — Round 3: Make rate-limit knobs configurable via .env
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed (this entry is pre-commit; staged but not yet committed):
+  - `apps/backend/src/config/env.ts` — `RATE_LIMIT_GENERATIONS_MAX` (default 5, min 3) and `RATE_LIMIT_GENERATIONS_WINDOW_MS` (default 60000, min 1000) added to the schema. The dead `RATE_LIMIT_PER_SESSION_PER_MIN` (declared but never read) was removed.
+  - `apps/backend/src/generations/generations.module.ts` — factory now reads both `MAX` and `WINDOW` from `ConfigService` (no longer hardcoded `windowMs: 60_000`). Emits a boot log line: `RateLimitConfig  generations limiter: max=N per Nms (~Ns window)` so operators can confirm the active config at startup.
+  - `apps/backend/test/production-parity.e2e-spec.ts` — 3 new env-loader tests: happy path (env values flow into the parsed `Env`), foot-gun guard (`MAX < 3` rejected with a clear error), and a second foot-gun guard (`WINDOW < 1000` rejected).
+  - `apps/backend/test/hardening.e2e-spec.ts` — 1 new integration test: builds an app with `MAX=5, WINDOW=10000` and asserts the response headers reflect those env-derived values (`RateLimit-Limit: 5`, `RateLimit-Reset: <= 10`).
+  - `apps/backend/test/setup.ts` — sets the new env names so the test suite's `loadEnv` succeeds.
+  - `.env.example` — full documentation for both knobs with the foot-gun rationale, the disable flag, and a reference to the boot log line. Removed the dead `RATE_LIMIT_PER_SESSION_PER_MIN`.
+  - `docker-compose.yml` — backend service env now lists `RATE_LIMIT_GENERATIONS_MAX`, `RATE_LIMIT_GENERATIONS_WINDOW_MS`, and `RATE_LIMIT_DISABLED` with `${...:-<default>}` interpolation so operators can override per environment.
+  - `docs/09-review-log.md` — updated two prior entries that referenced the old name.
+
+- Why this is a quality-of-life fix (not a feature):
+  The rate limit was half-configurable — `MAX` was tunable, but `WINDOW` was hardcoded to 60 s and the dead `RATE_LIMIT_PER_SESSION_PER_MIN` was confusing. Operators running benchmarks or stress tests had no way to widen the window without recompiling. After this change, the entire limiter is governed by env: `RATE_LIMIT_GENERATIONS_MAX=5 RATE_LIMIT_GENERATIONS_WINDOW_MS=60000` is the new contract.
+
+- Foot-gun guard rationale:
+  The poll cycle is `POST create → GET list refetch → GET batch poll`. With `MAX=2`, the very first poll would 429. With `MAX=1`, even the refetch would 429. The schema rejects `MAX < 3` at boot with a clear error, so a misconfiguration crashes the app immediately rather than silently bricking the UX. The `WINDOW_MS < 1000` guard is defensive (the in-memory `tryConsume` math would break at sub-second windows).
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run test:backend` → **228/228 pass** (was 224 + 4 new: 3 env-loader tests + 1 env-wiring integration test)
+  - `npm run test:frontend` → **152/152 pass** (no FE test changes — env knob is backend-only)
+  - **Live env override test**:
+    - `RATE_LIMIT_GENERATIONS_MAX=8 RATE_LIMIT_GENERATIONS_WINDOW_MS=20000 docker compose up -d backend` → boot log: `generations limiter: max=8 per 20000ms (~20s window)` ✓
+    - `RATE_LIMIT_GENERATIONS_MAX=2` → boot log: `Fatal bootstrap error: ... RATE_LIMIT_GENERATIONS_MAX must be >= 3 (one POST + one refetch + one poll)` ✓ (graceful fail, no zombie container)
+    - Default env → boot log: `generations limiter: max=5 per 60000ms (~60s window)` ✓ (backward compatible)
+
+- Lessons recorded:
+  - **Make every config knob a real env var, even "obviously" hardcoded ones.** A user running benchmarks shouldn't have to recompile to widen the window. The cost of exposing a knob (one zod line + one config read) is dwarfed by the UX of operators being able to tune without redeploying the image.
+  - **Foot-gun guards belong in the schema, not in the service.** Putting `MAX >= 3` in the zod schema gives a fail-fast boot with a clear error message. Putting it in the service would let the app start and then break the first user who hits POST.
+  - **Boot log lines for active config pay for themselves.** The first time someone wonders "is my env override actually applied?", the boot log answers the question without a debugger.
+
+---
+
+### 2026-06-20 — Round 2: Style 404 + Polling 429 storm (user-reported)
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed (this entry is pre-commit; staged but not yet committed):
+  - `apps/backend/src/style-profiles/style-profiles.service.ts` — `get()` returns `null` instead of throwing `NotFoundError` when the profile is missing. The `requireOwnedProject` check still throws on "project not found" (the real 404 case).
+  - `apps/backend/src/projects/projects.controller.ts` — `getStyle()` uses `@Res({ passthrough: false })` to bypass NestJS's response transformer (which mangled `null` → `{}`). The response body is now the literal JSON `null` (4 bytes). Without this, the frontend would crash on `response.json()` because the body is empty.
+  - `apps/backend/test/projects.e2e-spec.ts` — the old "returns 404 when style profile not set" test renamed and updated to "returns 200 + null body when no style profile is set". The follow-up "returns 404 for a non-existent project" test still asserts the real 404 case.
+  - `apps/frontend/src/api/client.ts` — `apiFetch` reads the response as `text()` first and only JSON-parses when non-empty. Empty 200 OK bodies return `undefined as T` (defensive). Also updates a module-level `getLastRateLimit()` cache on EVERY response (success or error) so polling can self-pace without round-tripping the server.
+  - `apps/frontend/src/hooks/useGenerations.ts` — `useBatchStatus` redesigned with a two-layer backoff:
+    1. **Proactive self-pacing**: when the latest `RateLimit-Remaining ≤ 1`, slow polling from 2 s → 8 s BEFORE the next request would 429.
+    2. **Reactive backoff** (safety net): on 429, honor the server's `Retry-After` header (server knows when the bucket resets — more accurate than a magic 30 s). Floor at 5 s.
+    3. **Stop polling on non-429 errors** — previously polled forever on 500/404 and burned the bucket before the user could re-trigger.
+  - `apps/frontend/src/hooks/useGenerations.test.tsx` — updated the "does not back off on non-429 errors" test to assert the new behavior (polling STOPS on 500), added a test for proactive self-pacing.
+  - `docs/MANUAL_TEST_CASES.md` — new file. Captures the manual repro of the user's bug report + the post-fix network panel sequence (verified via Playwright).
+
+- Why this is a bug fix (not a feature): Two distinct user-facing issues, both reproducible with a 1-minute Playwright walkthrough:
+  1. **Style 404 noise**: `GET /projects/<id>/style` returned 404 for "no style yet". The frontend correctly handled it (returns `null`), but the 404 in the network panel is indistinguishable from "project missing" and clutters the failure surface audit.
+  2. **Polling 429 storm**: With `RATE_LIMIT_GENERATIONS_MAX=5` (per 60s window) and 2 s polling, the bucket emptied in ~6 s. The previous `max(Retry-After, 30 s)` backoff only kicked in AFTER the 429 — and 30 s was shorter than the 60 s window, so polling resumed into a still-full bucket and triggered another 429. Perpetual ping-pong.
+
+- **Network panel — BEFORE fix (user's report):**
+  ```
+  200, 200, 200, 429, 200 (1 of 3), 429, 200 (2 of 3), [option 3 FAILED]
+  ```
+- **Network panel — AFTER fix (Playwright automated, 2026-06-20 14:58):**
+  ```
+    6265ms  POST   /generations            → 201  remaining=1  reset=21s
+    6319ms  GET    /generations            → 200  remaining=0  reset=21s
+   14349ms  GET    /batches/...            → 429  remaining=0  Retry-After=13  reset=13s
+   27427ms  GET    /batches/...            → 200  remaining=4  reset=60s   (bucket reset)
+  [all 3 cards FAILED with Polinations 402 — polling stops cleanly]
+  ```
+  **ONE 429 per batch**, not a perpetual cycle. The 13 s backoff (max(server Retry-After=13, floor=5)) waited long enough for the bucket to reset. The next poll returned 200 with `remaining=4` (fresh bucket, 4 requests available again).
+
+- Verification (all green before commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run test:backend` → **223/224 pass** (1 pre-existing M16 observability flake — Pollinations `healthcheck()` 503, same one documented in F2 review log)
+  - `npm run test:frontend` → **152/152 pass** (was 151 + 1 updated: "stops polling on non-429 errors" now asserts the new stop-on-error behavior)
+  - End-to-end via Playwright MCP: created project → set style → added room → wrote brief → clicked Generate → captured polling pattern via fetch observer → confirmed 1 429 then clean recovery.
+  - Curl probe: `GET /api/projects/<id>/style` returns `200 OK, body: "null"` (was `200 OK, body: ""` before the `@Res` bypass, and `404 NOT_FOUND` originally).
+
+- Lessons recorded:
+  - **NestJS `transform: true` + `unknown` return → `null` becomes `{}`**. When the response is genuinely nullable (e.g. "no style yet" vs "real 404"), the cleanest pattern is `@Res({ passthrough: false })` + `res.status(200).json(null)`. This bypasses class-transformer's response mangling.
+  - **Self-pacing > reactive backoff** for rate-limited APIs. Reading the `RateLimit-Remaining` header on every response and slowing down BEFORE the next request is more efficient than waiting for a 429 + backing off. The reactive backoff stays as a safety net for the cold-cache case (very first poll).
+  - **Module-level cache for cross-cutting concerns**: `getLastRateLimit()` is the simplest way to share response-derived state between `apiFetch` and the polling layer without adding a React context or store. The 60 s staleness check prevents an old "remaining: 0" reading from under-polling forever.
+  - **`apiFetch` body parsing** — reading `text()` first and only JSON-parsing non-empty bodies handles the class of endpoints that return 200 OK with empty/null bodies cleanly. This is a defensive belt-and-suspenders fix; the primary fix is the controller's `@Res` bypass.
+
+---
+
 ### 2026-06-20 — F12 Production Build
 
 - Reviewer: Project Owner (self)
@@ -1180,7 +1370,7 @@ All v1 open questions are resolved. New questions raised during implementation w
 - Decision: **Approved**
 - Scope reviewed: `apps/backend/src/common/{rate-limit.guard,security-headers.middleware,sanitize}.ts`, `apps/backend/src/main.ts`, `apps/backend/src/generations/generations.module.ts`, DTO updates, `test/hardening.e2e-spec.ts`
 - Notes:
-  - **Rate limiting** (`RateLimitGuard`): sliding-window in-memory bucket keyed by session cookie (sid) or client IP. Configured per `RateLimitGuard` instance via `RATE_LIMIT_CONFIG` token. APP_GUARD in `GenerationsModule` applies the limiter globally but `shouldLimit()` narrows the trigger to `/generations` and `/approval` paths so public routes are unaffected. `RATE_LIMIT_GENERATIONS_PER_MIN` defaults to 5 per ADR-013. `RATE_LIMIT_DISABLED` env flag lets test suites run unbounded.
+  - **Rate limiting** (`RateLimitGuard`): sliding-window in-memory bucket keyed by session cookie (sid) or client IP. Configured per `RateLimitGuard` instance via `RATE_LIMIT_CONFIG` token. APP_GUARD in `GenerationsModule` applies the limiter globally but `shouldLimit()` narrows the trigger to `/generations` and `/approval` paths so public routes are unaffected. `RATE_LIMIT_GENERATIONS_MAX` (default 5) and `RATE_LIMIT_GENERATIONS_WINDOW_MS` (default 60000) are tunable via env; the schema enforces `MAX >= 3` at boot to prevent the POST + refetch + poll cycle from self-tripping. `RATE_LIMIT_DISABLED=true` lets test suites run unbounded.
   - **Security headers** (`SecurityHeadersMiddleware`): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` denying camera/mic/geo/interest-cohort, `Cross-Origin-Resource-Policy: same-origin`, and HSTS on TLS only. Wired in `AppModule.configure()`.
   - **CORS lockdown**: existing `app.enableCors({ origin: corsOriginsList(env.CORS_ORIGINS), credentials: true })` was already in `main.ts`. Now exercised by M17 tests.
   - **Request size limit**: 100 KB JSON body cap via `express.json({ limit: '100kb' })`. Oversize bodies surface as `entity.too.large` from the parser; `AllExceptionsFilter` maps the error type to `VALIDATION_FAILED` with message "Request body too large." Configurable via `MAX_REQUEST_BODY_BYTES`.

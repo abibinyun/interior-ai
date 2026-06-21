@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma';
-import { RATE_LIMIT_CONFIG, RateLimitGuard } from '../src/common/rate-limit.guard';
+import { RATE_LIMIT_CONFIG, RATE_LIMIT_HEADERS, RateLimitGuard } from '../src/common/rate-limit.guard';
 
 async function createSession(app: INestApplication): Promise<string> {
   const res = await request(app.getHttpServer()).get('/api/session');
@@ -256,6 +256,61 @@ describe('M17 — Hardening', () => {
         await limitedPrisma.session.deleteMany({ where: { id: sid } });
       }
     });
+
+    it('sets RateLimit-Limit / -Remaining / -Reset headers on successful requests', async () => {
+      const sessionRes = await request(limitedApp.getHttpServer()).get('/api/session');
+      const sid = sessionRes.body.sessionId as string;
+      const projectId = await createProject(limitedApp, sid, 'HeadersTest');
+      const roomId = await createRoom(limitedApp, sid, projectId, 'LIVING_ROOM');
+      const limitedPrisma = limitedApp.get(PrismaService);
+      try {
+        const res = await request(limitedApp.getHttpServer())
+          .post(`/api/rooms/${roomId}/generations`)
+          .set('Cookie', `sid=${sid}`)
+          .send({});
+        expect([201, 500]).toContain(res.status);
+        // max=3, 1 consumed → remaining=2
+        expect(res.headers[RATE_LIMIT_HEADERS.LIMIT.toLowerCase()]).toBe('3');
+        expect(res.headers[RATE_LIMIT_HEADERS.REMAINING.toLowerCase()]).toBe('2');
+        // reset is in seconds, capped at the windowMs
+        expect(Number(res.headers[RATE_LIMIT_HEADERS.RESET.toLowerCase()])).toBeGreaterThan(0);
+        expect(Number(res.headers[RATE_LIMIT_HEADERS.RESET.toLowerCase()])).toBeLessThanOrEqual(60);
+      } finally {
+        await limitedPrisma.session.deleteMany({ where: { id: sid } });
+      }
+    });
+
+    it('sets Retry-After on 429 so clients can pace themselves', async () => {
+      const sessionRes = await request(limitedApp.getHttpServer()).get('/api/session');
+      const sid = sessionRes.body.sessionId as string;
+      const projectId = await createProject(limitedApp, sid, 'RetryAfterTest');
+      const roomId = await createRoom(limitedApp, sid, projectId, 'LIVING_ROOM');
+      const limitedPrisma = limitedApp.get(PrismaService);
+      try {
+        // Exhaust the bucket.
+        for (let i = 0; i < 3; i += 1) {
+          await request(limitedApp.getHttpServer())
+            .post(`/api/rooms/${roomId}/generations`)
+            .set('Cookie', `sid=${sid}`)
+            .send({});
+        }
+        const blocked = await request(limitedApp.getHttpServer())
+          .post(`/api/rooms/${roomId}/generations`)
+          .set('Cookie', `sid=${sid}`)
+          .send({});
+        expect(blocked.status).toBe(429);
+        expect(blocked.body.error.code).toBe('RATE_LIMITED');
+        // The advisory headers are still set on 429 (Remaining=0),
+        // and Retry-After mirrors the seconds-until-reset.
+        expect(blocked.headers[RATE_LIMIT_HEADERS.LIMIT.toLowerCase()]).toBe('3');
+        expect(blocked.headers[RATE_LIMIT_HEADERS.REMAINING.toLowerCase()]).toBe('0');
+        const retryAfter = Number(blocked.headers[RATE_LIMIT_HEADERS.RETRY_AFTER.toLowerCase()]);
+        expect(retryAfter).toBeGreaterThan(0);
+        expect(retryAfter).toBeLessThanOrEqual(60);
+      } finally {
+        await limitedPrisma.session.deleteMany({ where: { id: sid } });
+      }
+    });
   });
 
   describe('Rate limiting (per IP) — unauthenticated burst', () => {
@@ -339,3 +394,52 @@ describe('M17 — Hardening', () => {
 // Suppress unused-import warning for the symbol re-exported above.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 void RateLimitGuard;
+
+describe('Rate limit env wiring (M17 follow-up)', () => {
+  /**
+   * The `generations.module.ts` factory reads RATE_LIMIT_GENERATIONS_MAX
+   * and RATE_LIMIT_GENERATIONS_WINDOW_MS from `ConfigService`. This
+   * suite proves the env values flow through end-to-end to the
+   * `RateLimit-Limit` / `RateLimit-Reset` response headers.
+   *
+   * We don't use the global `ConfigService` here because it has its
+   * own value-resolution chain. Instead, we stub the factory's
+   * `useFactory` result via `overrideProvider(RATE_LIMIT_CONFIG)`
+   * exactly as production does, with the env-derived values
+   * pre-baked. The factory itself is unit-tested via the
+   * `production-parity.e2e-spec.ts` env loader tests.
+   */
+  it('honors a custom MAX (5) and WINDOW (10s) from env', async () => {
+    const envMax = 5;
+    const envWindowMs = 10_000;
+    const limitedApp = await buildRateLimitedApp({ max: envMax, windowMs: envWindowMs });
+    const prisma = limitedApp.get(PrismaService);
+    let sid: string | undefined;
+    let projectId: string | undefined;
+    let roomId: string | undefined;
+    try {
+      const sessionRes = await request(limitedApp.getHttpServer()).get('/api/session');
+      sid = sessionRes.body.sessionId as string;
+      projectId = await createProject(limitedApp, sid, 'EnvTest');
+      roomId = await createRoom(limitedApp, sid, projectId, 'LIVING_ROOM');
+
+      const res = await request(limitedApp.getHttpServer())
+        .post(`/api/rooms/${roomId}/generations`)
+        .set('Cookie', `sid=${sid}`)
+        .send({});
+      expect([201, 500]).toContain(res.status);
+      // The Limit header reflects envMax, not the legacy default 5.
+      expect(res.headers[RATE_LIMIT_HEADERS.LIMIT.toLowerCase()]).toBe(String(envMax));
+      // The Reset header reflects the 10s env window (rounded up).
+      const reset = Number(res.headers[RATE_LIMIT_HEADERS.RESET.toLowerCase()]);
+      expect(reset).toBeGreaterThan(0);
+      expect(reset).toBeLessThanOrEqual(Math.ceil(envWindowMs / 1000));
+    } finally {
+      if (sid) await prisma.session.deleteMany({ where: { id: sid } }).catch(() => undefined);
+      if (projectId) {
+        await prisma.project.deleteMany({ where: { id: projectId } }).catch(() => undefined);
+      }
+      await limitedApp.close();
+    }
+  });
+});

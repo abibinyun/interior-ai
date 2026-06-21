@@ -172,9 +172,36 @@ export class SupabaseStorageAdapter implements StorageAdapter {
     if (!parsed.signedURL) {
       throw this.makeError('STORAGE_FAILED', 'Supabase signed-url response missing signedURL', key, response.status);
     }
-    const signedUrl = parsed.signedURL.startsWith('http')
-      ? parsed.signedURL
-      : `${this.supabaseUrl}${parsed.signedURL}`;
+    // Supabase returns the signed URL as a RELATIVE path. The path
+    // starts with `/object/sign/...` (the "legacy" form, without
+    // the API version prefix). When a client follows that URL as-is
+    // (e.g. `https://<supabase>/object/sign/<bucket>/<key>?token=...`)
+    // Supabase responds 404 with `{"error":"requested path is
+    // invalid"}` — the legacy endpoint doesn't accept signed
+    // downloads. The CORRECT path is `/storage/v1/object/sign/...`
+    // (the versioned API), which returns the file with the right
+    // content-type.
+    //
+    // The fix: when Supabase returns a path that doesn't start with
+    // `/storage/`, prepend `/storage/v1` to the path (and the
+    // token, if present, rides along on the same string).
+    //
+    // We also accept a fully-qualified `http(s)://` URL from
+    // Supabase (older API versions sometimes return one) and use it
+    // as-is.
+    let resolvedPath = parsed.signedURL;
+    if (!resolvedPath.startsWith('http://') && !resolvedPath.startsWith('https://')) {
+      if (resolvedPath.startsWith('/storage/')) {
+        // Already versioned — use as-is.
+      } else if (resolvedPath.startsWith('/object/')) {
+        // Legacy form — prepend the API version.
+        resolvedPath = `/storage/v1${resolvedPath}`;
+      } else {
+        // Unknown relative form — be conservative and prepend.
+        resolvedPath = `/storage/v1${resolvedPath.startsWith('/') ? '' : '/'}${resolvedPath}`;
+      }
+    }
+    const signedUrl = resolvedPath.startsWith('http') ? resolvedPath : `${this.supabaseUrl}${resolvedPath}`;
     const expiresAt = new Date(Date.now() + ttlSeconds * 1000);
     return { key, signedUrl, expiresAt };
   }

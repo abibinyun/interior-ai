@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError } from '../lib/error';
+import { getLastRateLimit } from '../api/client';
 import {
   approve,
   createBatch,
@@ -29,10 +31,81 @@ export function useGenerationsByRoom(roomId: string | undefined) {
 }
 
 /**
+ * Steady-state polling interval when any row is still processing.
+ * 2 s gives a responsive "the card just flipped" feel without
+ * flooding the bucket. The self-pacing layer below will lengthen
+ * this when the bucket is hot.
+ */
+const STEADY_INTERVAL_MS = 2_000;
+
+/**
+ * Conservative interval when the bucket is low but not empty. We
+ * use this for `remaining === 1` so we still see completions but
+ * don't immediately burn the last token.
+ */
+const LOW_BUCKET_INTERVAL_MS = 8_000;
+
+/**
+ * Floor under the server's `Retry-After` value. If the server says
+ * "wait 2 s" we still wait at least 5 s so the bucket has time to
+ * actually reset (the header is a floor, not a precise deadline).
+ */
+const RETRY_AFTER_FLOOR_MS = 5_000;
+
+/**
  * Query wrapper around `GET /api/rooms/:id/generations/batches/:batchId`.
- * When `pollWhile` is true, the query auto-refreshes every 2s until
- * the batch has at least one PENDING or PROCESSING row. This is the
- * "watch the generations finish" polling the UI needs.
+ * When `pollWhile` is true, the query auto-refreshes until the batch
+ * has at least one PENDING or PROCESSING row. This is the "watch
+ * the generations finish" polling the UI needs.
+ *
+ * ## Polling interval adaptation
+ *
+ * The default backend bucket is 5 requests / 60 s (M17). The batch
+ * lifecycle is roughly:
+ *
+ * ```
+ *   POST /generations           ← consumes 1
+ *   GET  /generations (refetch) ← consumes 1
+ *   GET  /batches/:id  poll 1   ← consumes 1
+ *   GET  /batches/:id  poll 2   ← consumes 1
+ *   GET  /batches/:id  poll 3   ← consumes 1  → bucket empty
+ *   GET  /batches/:id  poll 4   ← 429
+ * ```
+ *
+ * With a 2 s steady interval, the bucket empties in ~6 s and the
+ * next poll triggers a 429. The previous "max(Retry-After, 30 s)"
+ * backoff only kicked in AFTER the first 429, so the user saw
+ * "200, 200, 200, 200, 200, 429, 30 s, 200, 200, 200, 200, 200,
+ * 429, 30 s, …" — visible as a perpetual 429 cycle in DevTools.
+ *
+ * The fix has two layers:
+ *
+ * 1. **Proactive self-pacing** (preferred): on every successful
+ *    poll, `apiFetch` updates a module-level cache with the latest
+ *    `RateLimit-Remaining` value. When `remaining <= 1`, the
+ *    polling interval jumps to `LOW_BUCKET_INTERVAL_MS` (8 s)
+ *    BEFORE the next request would 429. This avoids the
+ *    429 → backoff cycle entirely for most batches.
+ *
+ * 2. **Reactive backoff** (safety net): if a 429 slips through
+ *    (e.g., the very first poll when the cache is still cold),
+ *    honor the server's `Retry-After` header — but never less than
+ *    `RETRY_AFTER_FLOOR_MS`. The server's value is "seconds until
+ *    the bucket resets" and is computed from the actual bucket
+ *    state, so it's more accurate than a magic 30 s.
+ *
+ * ## Stop conditions
+ *
+ * - All rows are `COMPLETED` or `FAILED` → stop.
+ * - Query errored on anything other than 429 → stop (the user
+ *   must re-trigger generation; polling a broken batch is
+ *   pointless and was the source of the original "phantom poll"
+ *   problem that burned the bucket before generation even
+ *   started).
+ * - `pollWhile` is false → stop.
+ *
+ * If the user navigates away, `refetchIntervalInBackground: false`
+ * keeps the browser tab from spinning polls in the background.
  */
 export function useBatchStatus(
   roomId: string | undefined,
@@ -48,9 +121,35 @@ export function useBatchStatus(
     refetchInterval: (query) => {
       if (!pollWhile) return false;
       const data = query.state.data;
-      if (!data) return 2000;
+      const error = query.state.error;
+
+      // Any non-429 error is a stop condition. Re-polling won't
+      // fix a 400/404/500; the user has to re-trigger generation.
+      if (error) {
+        if (error instanceof ApiError && error.isRateLimited()) {
+          // Reactive backoff — server told us when the bucket
+          // resets. Floor it so a tiny "Retry-After: 1" doesn't
+          // re-burn the bucket immediately.
+          const serverBackoff = (error.retryAfter ?? 0) * 1000;
+          return Math.max(serverBackoff, RETRY_AFTER_FLOOR_MS);
+        }
+        return false;
+      }
+
+      if (!data) return STEADY_INTERVAL_MS;
       const allDone = data.items.every((g) => g.status === 'COMPLETED' || g.status === 'FAILED');
-      return allDone ? false : 2000;
+      if (allDone) return false;
+
+      // Proactive self-pacing: if our last observation of the
+      // bucket says it's almost empty, slow down BEFORE we get a
+      // 429. This is the main fix — it prevents the 429/200/429
+      // ping-pong the user reported in the F12 review session.
+      const rl = getLastRateLimit();
+      if (rl && rl.remaining <= 1) {
+        return LOW_BUCKET_INTERVAL_MS;
+      }
+
+      return STEADY_INTERVAL_MS;
     },
     refetchIntervalInBackground: false,
   });

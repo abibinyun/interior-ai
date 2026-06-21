@@ -43,6 +43,42 @@ describe('M18 — Production Parity', () => {
         process.env = saved;
       }
     });
+
+    it('reads RATE_LIMIT_GENERATIONS_MAX and WINDOW_MS from env', async () => {
+      const { loadEnv } = await import('../src/config/env');
+      const saved = { ...process.env };
+      process.env.RATE_LIMIT_GENERATIONS_MAX = '12';
+      process.env.RATE_LIMIT_GENERATIONS_WINDOW_MS = '30000';
+      try {
+        const env = loadEnv();
+        expect(env.RATE_LIMIT_GENERATIONS_MAX).toBe(12);
+        expect(env.RATE_LIMIT_GENERATIONS_WINDOW_MS).toBe(30_000);
+      } finally {
+        process.env = saved;
+      }
+    });
+
+    it('rejects RATE_LIMIT_GENERATIONS_MAX < 3 (foot-gun guard)', async () => {
+      const { loadEnv } = await import('../src/config/env');
+      const saved = { ...process.env };
+      process.env.RATE_LIMIT_GENERATIONS_MAX = '2';
+      try {
+        expect(() => loadEnv()).toThrow(/RATE_LIMIT_GENERATIONS_MAX/);
+      } finally {
+        process.env = saved;
+      }
+    });
+
+    it('rejects RATE_LIMIT_GENERATIONS_WINDOW_MS < 1000', async () => {
+      const { loadEnv } = await import('../src/config/env');
+      const saved = { ...process.env };
+      process.env.RATE_LIMIT_GENERATIONS_WINDOW_MS = '500';
+      try {
+        expect(() => loadEnv()).toThrow(/RATE_LIMIT_GENERATIONS_WINDOW_MS/);
+      } finally {
+        process.env = saved;
+      }
+    });
   });
 
   describe('Build metadata in /health/live (production)', () => {

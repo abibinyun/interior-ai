@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AI_PROVIDER_ADAPTER, AiProviderAdapter, GenerationRequest, GenerationResult, isProviderError } from '../ai/adapters/ai-provider.adapter';
+import { AiHordeAdapter } from '../ai/adapters/ai-horde.adapter';
 import { MyceliAdapter } from '../ai/adapters/myceli.adapter';
 import { PollinationsAdapter } from '../ai/adapters/pollinations.adapter';
 import { PrismaService } from '../prisma/prisma.service';
@@ -26,11 +27,17 @@ interface GenerationRow {
  *      (Postgres). This prevents two concurrent runBatch() invocations from
  *      fighting over the same PENDING rows (ADR-014).
  *   2. For each claimed row, call the active AI adapter.
- *   3. On transient error (PROVIDER_TIMEOUT, PROVIDER_BROKEN), one fallback
- *      attempt against the other adapter (AI-07).
+ *   3. On transient error, one fallback attempt against the other
+ *      adapter (AI-07). "Transient" = `PROVIDER_TIMEOUT`,
+ *      `PROVIDER_BROKEN`, OR `PROVIDER_REJECTED` with statusCode 402
+ *      (Payment Required — the active provider's account is out of
+ *      credits; the fallback has its own billing) or 429 (provider-
+ *      side rate limit; the fallback has its own bucket). Other 4xx
+ *      statuses (400 bad prompt, 401 missing key, 403 forbidden, 404
+ *      model not found) are treated as permanent and do NOT fallback.
  *   4. On success, upload the image buffer to storage; on storage failure,
  *      mark FAILED with STORAGE_FAILED (SG-03).
- *   5. On non-transient error (PROVIDER_REJECTED), no fallback; mark FAILED.
+ *   5. On non-transient error, no fallback; mark FAILED.
  *   6. Update room status: IN_REVIEW if at least one completed, GENERATING
  *      kept if all failed (G-10 — never silently discarded).
  *
@@ -47,6 +54,14 @@ export class PipelineOrchestrator {
     @Inject(AI_PROVIDER_ADAPTER) private readonly activeAdapter: AiProviderAdapter,
     @Inject(PollinationsAdapter) private readonly pollinations: PollinationsAdapter,
     @Inject(MyceliAdapter) private readonly myceli: MyceliAdapter,
+    // AiHordeAdapter is injected so the Nest container can resolve
+    // it (the AiModule registers it as a provider), but the
+    // orchestrator itself only needs the synchronous providers for
+    // the AI-07 fallback path — Horde's async submit+poll would
+    // blow the hard-timeout budget if used as a second-tier
+    // fallback. `aiHorde` is intentionally held only to keep DI
+    // happy; access it via `activeAdapter` when it is selected.
+    @Inject(AiHordeAdapter) _aiHorde: AiHordeAdapter,
     @Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter,
     @Inject(ConfigService) config: ConfigService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -121,7 +136,7 @@ export class PipelineOrchestrator {
     };
 
     let result: GenerationResult | null = null;
-    let lastError: { code: string; message: string } | null = null;
+    let lastError: { code: string; message: string; statusCode?: number } | null = null;
 
     try {
       result = await this.activeAdapter.generate(request);
@@ -131,8 +146,11 @@ export class PipelineOrchestrator {
     }
 
     if (!result && this.shouldFallback(lastError)) {
-      const fallback = this.activeAdapter.name === 'pollinations' ? this.myceli : this.pollinations;
-      this.logger.warn({ generationId: gen.id, fallback: fallback.name }, 'attempting fallback (AI-07)');
+      const fallback = this.pickFallback();
+      this.logger.warn(
+        { generationId: gen.id, fallback: fallback.name, primaryStatus: lastError?.statusCode, primaryCode: lastError?.code },
+        'attempting fallback (AI-07)',
+      );
       try {
         result = await fallback.generate(request);
         lastError = null;
@@ -189,14 +207,51 @@ export class PipelineOrchestrator {
     return room.projectId;
   }
 
-  private shouldFallback(err: { code: string } | null): boolean {
+  private shouldFallback(err: { code: string; statusCode?: number } | null): boolean {
     if (!err) return false;
-    return err.code === 'PROVIDER_TIMEOUT' || err.code === 'PROVIDER_BROKEN';
+    // Transient transport / server-side errors → always fallback.
+    if (err.code === 'PROVIDER_TIMEOUT' || err.code === 'PROVIDER_BROKEN') return true;
+    // PROVIDER_REJECTED is normally treated as permanent (e.g. 400
+    // bad prompt, 401 missing key, 403 forbidden, 404 model not
+    // found). But two statuses ARE transient and should fall through
+    // to the other provider:
+    //   402 Payment Required — the active provider's account is out
+    //     of credits / tier-limited. The fallback provider is a
+    //     different account, so it can still serve the request.
+    //   429 Too Many Requests — provider-side rate limit. Retrying
+    //     against the same bucket just hits the wall again; the
+    //     fallback provider has its own bucket.
+    if (err.code === 'PROVIDER_REJECTED' && (err.statusCode === 402 || err.statusCode === 429)) {
+      return true;
+    }
+    return false;
   }
 
-  private mapProviderError(err: unknown): { code: string; message: string } {
+  /**
+   * Picks a fallback adapter different from the active one. The
+   * three registered adapters are: pollinations, myceli, ai-horde.
+   * If the active is pollinations, prefer myceli (synchronous, fast)
+   * as the first fallback; if that also fails the AI-07 path stops
+   * (we don't try a third provider — that would consume the
+   * `GENERATION_HARD_TIMEOUT_MS` budget twice and surface a
+   * confusing error chain to the user).
+   */
+  private pickFallback(): AiProviderAdapter {
+    if (this.activeAdapter.name === 'pollinations') return this.myceli;
+    if (this.activeAdapter.name === 'myceli') return this.pollinations;
+    // ai-horde active → fall back to the synchronous pollinations
+    // (Horde's async submit+poll already consumes the hard-timeout
+    // budget, so a second async provider is not safe).
+    return this.pollinations;
+  }
+
+  private mapProviderError(err: unknown): { code: string; message: string; statusCode?: number } {
     if (isProviderError(err)) {
-      return { code: err.code, message: err.message };
+      return {
+        code: err.code,
+        message: err.message,
+        ...(err.statusCode !== undefined ? { statusCode: err.statusCode } : {}),
+      };
     }
     return { code: 'PROVIDER_BROKEN', message: (err as Error)?.message ?? 'Unknown error.' };
   }

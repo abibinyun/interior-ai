@@ -90,16 +90,32 @@ describe('SupabaseStorageAdapter', () => {
       }
     });
 
-    it('rejects unsupported content-types (SG-06)', async () => {
+    it('rejects empty content-type (sanity check)', async () => {
+      // F9 hardening: the adapter no longer rejects non-image MIME
+      // types (per-resource services validate their own MIME —
+      // ReferencesService validates SG-06, ExportsService uses
+      // application/zip, etc.). The adapter still rejects an empty
+      // content-type as a defensive sanity check.
       expect.assertions(2);
       const { fetcher } = makeFakeHttp(() => ({ status: 200 }));
       const adapter = new SupabaseStorageAdapter(makeConfig(), fetcher);
       try {
-        await adapter.upload({ key: 'k', body: Buffer.from('x'), contentType: 'application/pdf' });
+        await adapter.upload({ key: 'k', body: Buffer.from('x'), contentType: '' });
       } catch (err) {
         expect(isStorageError(err)).toBe(true);
         expect((err as { code: string }).code).toBe('UPLOAD_REJECTED');
       }
+    });
+
+    it('accepts non-image content-types (e.g. application/zip for exports)', async () => {
+      // F9 hardening: export bundles are application/zip — the
+      // adapter must NOT reject non-image types. The previous
+      // image-only gate was production-blocking.
+      const { fetcher } = makeFakeHttp(() => ({ status: 200 }));
+      const adapter = new SupabaseStorageAdapter(makeConfig(), fetcher);
+      await expect(
+        adapter.upload({ key: 'k', body: Buffer.from('zip'), contentType: 'application/zip' }),
+      ).resolves.toMatchObject({ key: 'k' });
     });
 
     it('accepts all allowed MIME types', async () => {
@@ -172,6 +188,52 @@ describe('SupabaseStorageAdapter', () => {
       const adapter = new SupabaseStorageAdapter(makeConfig(), fetcher);
       const result = await adapter.signedUrl('k', 60);
       expect(result.signedUrl).toBe(absolute);
+    });
+
+    it('prepends /storage/v1 to legacy /object/sign/... path (export bundle bug fix)', async () => {
+      // Supabase's current API returns the signed URL as a relative
+      // path in the LEGACY form `/object/sign/<bucket>/<key>?token=...`
+      // (no `/storage/v1/` prefix). When a client GETs that path
+      // as-is, Supabase responds 404 with
+      // `{"error":"requested path is invalid"}` because the legacy
+      // `/object/sign/...` endpoint doesn't accept signed downloads.
+      // The correct download path is `/storage/v1/object/sign/...`.
+      // The adapter must rewrite the relative path before returning.
+      const legacyPath = '/object/sign/generations/development/exports/projects/p1/v1.zip?token=eyJabc';
+      const { fetcher } = makeFakeHttp(() => ({
+        status: 200,
+        body: JSON.stringify({ signedURL: legacyPath }),
+      }));
+      const adapter = new SupabaseStorageAdapter(makeConfig(), fetcher);
+      const result = await adapter.signedUrl('development/exports/projects/p1/v1.zip', 900);
+      expect(result.signedUrl).toBe(
+        'https://test.supabase.co/storage/v1/object/sign/generations/development/exports/projects/p1/v1.zip?token=eyJabc',
+      );
+    });
+
+    it('preserves already-versioned /storage/... path as-is', async () => {
+      const versionedPath = '/storage/v1/object/sign/generations/k.png?token=xyz';
+      const { fetcher } = makeFakeHttp(() => ({
+        status: 200,
+        body: JSON.stringify({ signedURL: versionedPath }),
+      }));
+      const adapter = new SupabaseStorageAdapter(makeConfig(), fetcher);
+      const result = await adapter.signedUrl('k.png', 60);
+      expect(result.signedUrl).toBe('https://test.supabase.co/storage/v1/object/sign/generations/k.png?token=xyz');
+    });
+
+    it('falls back to prepending /storage/v1 for unknown relative forms', async () => {
+      // Defensive: if Supabase ever returns a relative path that
+      // doesn't start with `/storage/` or `/object/`, prepend
+      // `/storage/v1` so the URL still hits the versioned API.
+      const weirdPath = '/sign/generations/k.png?token=q';
+      const { fetcher } = makeFakeHttp(() => ({
+        status: 200,
+        body: JSON.stringify({ signedURL: weirdPath }),
+      }));
+      const adapter = new SupabaseStorageAdapter(makeConfig(), fetcher);
+      const result = await adapter.signedUrl('k.png', 60);
+      expect(result.signedUrl).toBe('https://test.supabase.co/storage/v1/sign/generations/k.png?token=q');
     });
 
     it('maps errors to STORAGE_FAILED', async () => {

@@ -283,7 +283,7 @@ describe('M4 — Projects + Style', () => {
       await cleanup(sessionId);
     });
 
-    it('returns 404 when style profile not set', async () => {
+    it('returns 200 + null body when no style profile is set', async () => {
       const create = await request(app.getHttpServer())
         .post('/api/projects')
         .set('Cookie', `sid=${sessionId}`)
@@ -292,7 +292,13 @@ describe('M4 — Projects + Style', () => {
       const res = await request(app.getHttpServer())
         .get(`/api/projects/${id}/style`)
         .set('Cookie', `sid=${sessionId}`);
-      expect(res.status).toBe(404);
+      // "No style yet" is a successful probe (returns null body), NOT
+      // a 404. The 404 is reserved for "the project itself doesn't
+      // exist" (the next test). This keeps the network panel clean —
+      // a 404 on every first SPA load is noisy and indistinguishable
+      // from a real "project missing" 404.
+      expect(res.status).toBe(200);
+      expect(res.body).toBeNull();
     });
 
     it('sets a style profile (ST-01, ST-02)', async () => {

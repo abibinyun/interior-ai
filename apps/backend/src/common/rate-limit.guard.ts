@@ -5,7 +5,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { RateLimitedError } from './errors';
 
 interface RateLimitOptions {
@@ -23,6 +23,26 @@ interface BucketEntry {
 }
 
 export const RATE_LIMIT_CONFIG = Symbol('RATE_LIMIT_CONFIG');
+
+/**
+ * Standard rate-limit headers. Mirrors the de-facto convention used
+ * by GitHub / Twitter / Cloudflare so any client (browser, curl,
+ * downstream proxy) can self-pace without trial-and-error.
+ *
+ * - `RateLimit-Limit`     — the maximum number of requests in the
+ *                            current window.
+ * - `RateLimit-Remaining`  — the number of requests still allowed
+ *                            in the current window (clamped at >= 0).
+ * - `RateLimit-Reset`      — seconds until the bucket resets.
+ * - `Retry-After`          — emitted only on 429; RFC 6585 §4.
+ *                            Seconds until the client may retry.
+ */
+export const RATE_LIMIT_HEADERS = {
+  LIMIT: 'RateLimit-Limit',
+  REMAINING: 'RateLimit-Remaining',
+  RESET: 'RateLimit-Reset',
+  RETRY_AFTER: 'Retry-After',
+} as const;
 
 /**
  * Sliding-window in-memory rate limiter. Per session-or-ip, per limiter
@@ -53,11 +73,20 @@ export class RateLimitGuard implements CanActivate {
 
   canActivate(execContext: ExecutionContext): boolean {
     const req = execContext.switchToHttp().getRequest<Request>();
+    const res = execContext.switchToHttp().getResponse<Response>();
     if (!this.shouldLimit(req)) return true;
     const key = this.buildKey(req);
     if (!key) return true; // no session, no IP — skip
-    if (this.isOverLimit(key)) {
-      this.logger.warn({ key, name: this.options.name, max: this.options.max, windowMs: this.options.windowMs }, 'rate limit exceeded');
+    const decision = this.tryConsume(key);
+    // Always set the advisory headers on limited endpoints (even on
+    // success) so well-behaved clients can self-pace without trial
+    // and error.
+    this.setAdvisoryHeaders(res, decision);
+    if (decision.overLimit) {
+      this.logger.warn(
+        { key, name: this.options.name, max: this.options.max, windowMs: this.options.windowMs },
+        'rate limit exceeded',
+      );
       throw new RateLimitedError(`Rate limit exceeded for ${this.options.name}.`);
     }
     return true;
@@ -98,17 +127,39 @@ export class RateLimitGuard implements CanActivate {
     return req.ip ?? req.socket?.remoteAddress ?? null;
   }
 
-  private isOverLimit(key: string): boolean {
+  /**
+   * Returns the new bucket state. Always sets a fresh bucket on the
+   * first hit, increments within the window, and signals over-limit
+   * once the count crosses the configured max.
+   */
+  private tryConsume(key: string): { overLimit: boolean; remaining: number; resetInSeconds: number } {
     const now = Date.now();
     const entry = this.buckets.get(key);
     if (!entry || entry.resetAt <= now) {
+      const resetInSeconds = Math.max(1, Math.ceil(this.options.windowMs / 1000));
       this.buckets.set(key, { resetAt: now + this.options.windowMs, count: 1 });
-      return false;
+      return { overLimit: false, remaining: this.options.max - 1, resetInSeconds };
     }
+    const resetInSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
     if (entry.count >= this.options.max) {
-      return true;
+      return { overLimit: true, remaining: 0, resetInSeconds };
     }
     entry.count += 1;
-    return false;
+    return {
+      overLimit: false,
+      remaining: Math.max(0, this.options.max - entry.count),
+      resetInSeconds,
+    };
+  }
+
+  private setAdvisoryHeaders(res: Response, decision: ReturnType<RateLimitGuard['tryConsume']>): void {
+    if (res.headersSent) return;
+    res.setHeader(RATE_LIMIT_HEADERS.LIMIT, String(this.options.max));
+    res.setHeader(RATE_LIMIT_HEADERS.REMAINING, String(decision.remaining));
+    res.setHeader(RATE_LIMIT_HEADERS.RESET, String(decision.resetInSeconds));
+    if (decision.overLimit) {
+      // RFC 6585 §4 — server MAY include Retry-After on 429.
+      res.setHeader(RATE_LIMIT_HEADERS.RETRY_AFTER, String(decision.resetInSeconds));
+    }
   }
 }

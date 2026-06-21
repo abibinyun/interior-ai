@@ -18,9 +18,13 @@ export class StyleProfilesService {
   async get(projectId: string): Promise<unknown> {
     await this.requireOwnedProject(projectId);
     const profile = await this.repo.findByProjectId(projectId);
-    if (!profile) {
-      throw new NotFoundError('Style profile not set for this project.');
-    }
+    // "No style yet" is not a 404 — it's a successful probe that
+    // returns null. The 404 is reserved for "project itself doesn't
+    // exist" (handled by requireOwnedProject above). This keeps the
+    // network panel clean (no spurious 404s in every SPA load) and
+    // matches the rest-pattern used by `getProjectStyle` on the
+    // frontend.
+    if (!profile) return null;
     return this.serialize(profile);
   }
 

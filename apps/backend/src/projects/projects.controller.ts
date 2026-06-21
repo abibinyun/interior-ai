@@ -9,8 +9,10 @@ import {
   Patch,
   Post,
   Put,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { RoomsService } from '../rooms/rooms.service';
 import { CreateRoomDto } from '../rooms/dto/create-room.dto';
 import { SessionGuard } from '../sessions/session.guard';
@@ -66,8 +68,17 @@ export class ProjectsController {
   @Get(':projectId/style')
   async getStyle(
     @Param('projectId', new ParseUUIDPipe()) projectId: string,
-  ): Promise<unknown> {
-    return this.styles.get(projectId);
+    @Res({ passthrough: false }) res: Response,
+  ): Promise<void> {
+    // Bypass NestJS's response transformer: with `transform: true` on
+    // the global ValidationPipe, returning `null` gets mangled into
+    // an empty object by `plainToClass`. Sending the response
+    // manually here means the body is the literal JSON `null` (4
+    // bytes), which the frontend's `getProjectStyle` parses
+    // correctly. Returning `void` + sending via `@Res` keeps the
+    // rest of the controller untouched.
+    const profile = await this.styles.get(projectId);
+    res.status(200).json(profile);
   }
 
   @Put(':projectId/style')

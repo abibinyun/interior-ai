@@ -22,7 +22,8 @@ process.env.SUPABASE_URL = 'https://test.supabase.co';
 process.env.SUPABASE_SERVICE_ROLE_KEY = '';
 process.env.SUPABASE_STORAGE_BUCKET = 'generations';
 process.env.SIGNED_URL_TTL_SECONDS = '900';
-process.env.RATE_LIMIT_PER_SESSION_PER_MIN = '10';
+process.env.RATE_LIMIT_GENERATIONS_MAX = '5';
+process.env.RATE_LIMIT_GENERATIONS_WINDOW_MS = '60000';
 // Disable rate limiting in tests so suites that make many requests per
 // session don't hit the 429 wall. M17 hardening verified the limiter
 // separately in a dedicated burst test.

@@ -42,3 +42,20 @@ pids
 # test
 junit.xml
 test-report.xml
+
+# playwright (local dev artifacts; never commit)
+.playwright-mcp/
+
+# session / chat artifacts (dev artifacts; never commit)
+session.json
+session-*.md
+session-*.jsonl
+
+# test screenshots (local artifacts; never commit)
+*.screenshot.png
+f7-project-dashboard.png
+generations-*.png
+
+# local-only notes / brief / prompt docs (never commit)
+prompt.md
+docs/Assessment Brief.md

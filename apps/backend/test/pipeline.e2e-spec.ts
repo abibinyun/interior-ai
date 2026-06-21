@@ -7,6 +7,7 @@ import { AppModule } from '../src/app.module';
 import { AI_PROVIDER_ADAPTER, AiProviderAdapter, GenerationRequest, GenerationResult, ProviderError, ProviderHealth } from '../src/ai/adapters/ai-provider.adapter';
 import { MyceliAdapter } from '../src/ai/adapters/myceli.adapter';
 import { PollinationsAdapter } from '../src/ai/adapters/pollinations.adapter';
+import { AiHordeAdapter } from '../src/ai/adapters/ai-horde.adapter';
 import { STORAGE_ADAPTER, StorageAdapter, UploadRequest, UploadResult, SignedUrlResult } from '../src/storage/storage.adapter';
 import { PrismaService } from '../src/prisma';
 import { PipelineOrchestrator } from '../src/generations/pipeline-orchestrator';
@@ -79,10 +80,18 @@ function makeBrokenError(): ProviderError {
   return e;
 }
 
-function makeRejectedError(): ProviderError {
-  const e = new Error('400') as Error & { code: 'PROVIDER_REJECTED'; provider: string };
+function makeRejectedError(statusCode = 400): ProviderError {
+  // 4xx (default 400) — generic "bad request", NOT a fallback trigger.
+  // Pass 402 or 429 to simulate the transient rejection cases that DO
+  // trigger fallback (see shouldFallback in pipeline-orchestrator).
+  const e = new Error(`${statusCode}`) as Error & {
+    code: 'PROVIDER_REJECTED';
+    provider: string;
+    statusCode: number;
+  };
   e.code = 'PROVIDER_REJECTED';
   e.provider = 'fake';
+  e.statusCode = statusCode;
   return e;
 }
 
@@ -154,6 +163,8 @@ describe('M9 — Generation Pipeline', () => {
       .useValue(primary)
       .overrideProvider(MyceliAdapter)
       .useValue(fallback)
+      .overrideProvider(AiHordeAdapter)
+      .useValue(new FakeAiAdapter('ai-horde', []))
       .overrideProvider(STORAGE_ADAPTER)
       .useValue(storage)
       .compile();
@@ -274,10 +285,12 @@ describe('M9 — Generation Pipeline', () => {
     await cleanup(sid);
   });
 
-  it('PROVIDER_REJECTED does NOT trigger fallback (AI-07)', async () => {
+  it('PROVIDER_REJECTED (400) does NOT trigger fallback (AI-07)', async () => {
+    // 400 Bad Request is permanent — bad prompt, no point in trying
+    // a different provider with the same prompt. Fallback skipped.
     fakeStorage = new FakeStorageAdapter();
     fakePrimary = new FakeAiAdapter('pollinations', [
-      makeRejectedError(), makeRejectedError(), makeRejectedError(),
+      makeRejectedError(400), makeRejectedError(400), makeRejectedError(400),
     ]);
     fakeFallback = new FakeAiAdapter('myceli', []);
     await setupApp(fakePrimary, fakeFallback, fakeStorage);
@@ -298,6 +311,84 @@ describe('M9 — Generation Pipeline', () => {
       .get(`/api/rooms/${roomId}`)
       .set('Cookie', `sid=${sid}`);
     expect(room.body.status).toBe('GENERATING');
+    await cleanup(sid);
+  });
+
+  it('PROVIDER_REJECTED 402 (Payment Required) DOES trigger fallback', async () => {
+    // 402 means the active provider's account is out of credits. The
+    // fallback provider has its own billing, so it can still serve
+    // the request. This is the "Pollinations tier limit" case.
+    fakeStorage = new FakeStorageAdapter();
+    fakePrimary = new FakeAiAdapter('pollinations', [
+      makeRejectedError(402), makeRejectedError(402), makeRejectedError(402),
+    ]);
+    fakeFallback = new FakeAiAdapter('myceli', [
+      { imageBuffer: pngBuffer(), contentType: 'image/png', provider: 'myceli' },
+      { imageBuffer: pngBuffer(), contentType: 'image/png', provider: 'myceli' },
+      { imageBuffer: pngBuffer(), contentType: 'image/png', provider: 'myceli' },
+    ]);
+    await setupApp(fakePrimary, fakeFallback, fakeStorage);
+
+    const sid = await createSession(app);
+    const projectId = await createProject(app, sid, 'Pipeline402');
+    const roomId = await createRoom(app, sid, projectId, 'WORKSPACE');
+    await setBrief(app, sid, roomId);
+
+    const { items } = await startAndRun(sid, roomId);
+    for (const item of items) expect(item.status).toBe('COMPLETED');
+    expect(fakeFallback.getCalls()).toBe(3);
+    await cleanup(sid);
+  });
+
+  it('PROVIDER_REJECTED 429 (provider-side rate limit) DOES trigger fallback', async () => {
+    // 429 from the provider means their bucket is full. The fallback
+    // has its own bucket, so retry via the other adapter.
+    fakeStorage = new FakeStorageAdapter();
+    fakePrimary = new FakeAiAdapter('pollinations', [
+      makeRejectedError(429), makeRejectedError(429), makeRejectedError(429),
+    ]);
+    fakeFallback = new FakeAiAdapter('myceli', [
+      { imageBuffer: pngBuffer(), contentType: 'image/png', provider: 'myceli' },
+      { imageBuffer: pngBuffer(), contentType: 'image/png', provider: 'myceli' },
+      { imageBuffer: pngBuffer(), contentType: 'image/png', provider: 'myceli' },
+    ]);
+    await setupApp(fakePrimary, fakeFallback, fakeStorage);
+
+    const sid = await createSession(app);
+    const projectId = await createProject(app, sid, 'Pipeline429');
+    const roomId = await createRoom(app, sid, projectId, 'WORKSPACE');
+    await setBrief(app, sid, roomId);
+
+    const { items } = await startAndRun(sid, roomId);
+    for (const item of items) expect(item.status).toBe('COMPLETED');
+    expect(fakeFallback.getCalls()).toBe(3);
+    await cleanup(sid);
+  });
+
+  it('PROVIDER_REJECTED 402 with no fallback configured → FAILED with original error', async () => {
+    // If the fallback isn't available (or is itself failing), the
+    // primary 402 should still be surfaced so the user sees the
+    // real error.
+    fakeStorage = new FakeStorageAdapter();
+    fakePrimary = new FakeAiAdapter('pollinations', [
+      makeRejectedError(402), makeRejectedError(402), makeRejectedError(402),
+    ]);
+    fakeFallback = new FakeAiAdapter('myceli', [
+      makeBrokenError(), makeBrokenError(), makeBrokenError(),
+    ]);
+    await setupApp(fakePrimary, fakeFallback, fakeStorage);
+
+    const sid = await createSession(app);
+    const projectId = await createProject(app, sid, 'PipelineNoFallback');
+    const roomId = await createRoom(app, sid, projectId, 'WORKSPACE');
+    await setBrief(app, sid, roomId);
+
+    const { items } = await startAndRun(sid, roomId);
+    for (const item of items) {
+      expect(item.status).toBe('FAILED');
+      expect(item.errorCode).toBe('PROVIDER_BROKEN');
+    }
+    expect(fakeFallback.getCalls()).toBe(3);
     await cleanup(sid);
   });
 

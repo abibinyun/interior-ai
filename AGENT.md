@@ -309,6 +309,6 @@ npm run test:cov                        # coverage
 
 ---
 
-**Last updated**: 2026-06-18 (post-M2)
-**Milestone status**: M1 ✅ committed, M2 ✅ committed, M3 ready to start
-**Current phase**: Backend persistence complete; session guard + cross-session enforcement next
+**Last updated**: 2026-06-21 (post-rounds 2–5: style 404, polling 429, env-tunable rate limit, AI Horde provider, signed-URL fix)
+**Milestone status**: M1–M18 ✅ committed (backend), F1–F12 ✅ committed (frontend). Post-F12 rounds: ✅ 429 hardening · ✅ style 404 noise fix · ✅ env-tunable rate limit · ✅ AI Horde provider + 402/429 fallback · ✅ export bundle signed-URL path fix.
+**Current phase**: All v1 milestones shipped + 4 user-reported bugs fixed. Submission prep (README polish + public deploy + Loom recording) is the current focus. Once the live URL is up, the v1 journey is done.

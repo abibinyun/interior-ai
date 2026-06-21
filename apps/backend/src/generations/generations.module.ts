@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, Logger } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { AiModule } from '../ai/ai.module';
@@ -26,15 +26,27 @@ import { PromptComposer } from './prompt-composer';
     {
       provide: RATE_LIMIT_CONFIG,
       inject: [ConfigService],
-      useFactory: (config: ConfigService): { max: number; windowMs: number; name: string } => {
+      useFactory: (
+        config: ConfigService,
+      ): { max: number; windowMs: number; name: string } => {
+        // Disabled mode (used by tests). `Number.MAX_SAFE_INTEGER` is
+        // an effective bypass — the guard never trips.
         if (config.get<boolean>('RATE_LIMIT_DISABLED', false)) {
+          const log = new Logger('RateLimitConfig');
+          log.warn('RATE_LIMIT_DISABLED=true — guard will not trip');
           return { max: Number.MAX_SAFE_INTEGER, windowMs: 60_000, name: 'generations' };
         }
-        return {
-          max: config.get<number>('RATE_LIMIT_GENERATIONS_PER_MIN', 5),
-          windowMs: 60_000,
-          name: 'generations',
-        };
+        // Read both knobs from env. `RATE_LIMIT_GENERATIONS_WINDOW_MS`
+        // is the window length in ms; we surface it in the boot log
+        // alongside `max` so operators can confirm the active
+        // configuration at startup.
+        const max = config.get<number>('RATE_LIMIT_GENERATIONS_MAX', 5);
+        const windowMs = config.get<number>('RATE_LIMIT_GENERATIONS_WINDOW_MS', 60_000);
+        const log = new Logger('RateLimitConfig');
+        log.log(
+          `generations limiter: max=${max} per ${windowMs}ms (~${(windowMs / 1000).toFixed(0)}s window)`,
+        );
+        return { max, windowMs, name: 'generations' };
       },
     },
     {

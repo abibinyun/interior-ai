@@ -124,4 +124,62 @@ describe('apiFetch', () => {
       expect(apiErr.message).toBe('boom');
     }
   });
+
+  it('captures Retry-After + RateLimit-* headers on 429 RATE_LIMITED', async () => {
+    const res = mockJsonResponse(429, {
+      error: { code: 'RATE_LIMITED', message: 'Rate limit exceeded for generations.' },
+    });
+    // Decorate with the rate-limit advisory headers the backend
+    // emits via the refreshed M17 RateLimitGuard (F12 hardening fix).
+    Object.entries({
+      'Retry-After': '42',
+      'RateLimit-Limit': '5',
+      'RateLimit-Remaining': '0',
+      'RateLimit-Reset': '42',
+    }).forEach(([k, v]) => res.headers.set(k, v));
+    globalThis.fetch = vi.fn().mockResolvedValue(res) as unknown as typeof fetch;
+
+    try {
+      await apiFetch('/rooms/r1/generations', { method: 'POST', body: {} });
+    } catch (err) {
+      const apiErr = err as ApiError;
+      expect(apiErr.status).toBe(429);
+      expect(apiErr.code).toBe('RATE_LIMITED');
+      expect(apiErr.isRateLimited()).toBe(true);
+      expect(apiErr.retryAfter).toBe(42);
+      expect(apiErr.rateLimit).toEqual({ limit: 5, remaining: 0, resetInSeconds: 42 });
+    }
+  });
+
+  it('leaves retryAfter undefined when Retry-After header is absent', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        mockJsonResponse(429, { error: { code: 'RATE_LIMITED', message: 'slow down' } }),
+      ) as unknown as typeof fetch;
+
+    try {
+      await apiFetch('/rooms/r1/generations', { method: 'POST', body: {} });
+    } catch (err) {
+      const apiErr = err as ApiError;
+      expect(apiErr.isRateLimited()).toBe(true);
+      expect(apiErr.retryAfter).toBeUndefined();
+      expect(apiErr.rateLimit).toBeUndefined();
+    }
+  });
+
+  it('parses HTTP-date Retry-After into a seconds delta', async () => {
+    const future = new Date(Date.now() + 30_000).toUTCString();
+    const res = mockJsonResponse(429, { error: { code: 'RATE_LIMITED', message: 'slow' } });
+    res.headers.set('Retry-After', future);
+    globalThis.fetch = vi.fn().mockResolvedValue(res) as unknown as typeof fetch;
+
+    try {
+      await apiFetch('/rooms/r1/generations', { method: 'POST', body: {} });
+    } catch (err) {
+      const apiErr = err as ApiError;
+      expect(apiErr.retryAfter).toBeGreaterThanOrEqual(28);
+      expect(apiErr.retryAfter).toBeLessThanOrEqual(31);
+    }
+  });
 });
