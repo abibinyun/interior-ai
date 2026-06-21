@@ -53,8 +53,8 @@ export class AiHordeAdapter implements AiProviderAdapter {
   private readonly apiKey: string;
   private readonly hardTimeoutMs: number;
 
-  /** How often to poll the `/check` endpoint while waiting for the job. */
-  private static readonly POLL_INTERVAL_MS = 2_000;
+  /** How often to poll the `/status` endpoint while waiting for the job. */
+  private static readonly POLL_INTERVAL_MS = 5_000;
 
   constructor(
     @Inject(ConfigService) config: ConfigService,
@@ -110,6 +110,10 @@ export class AiHordeAdapter implements AiProviderAdapter {
   // -------------------------------------------------------------------------
 
   private async submit(request: GenerationRequest): Promise<string> {
+    // 30s deadline for submit + one retry with backoff. The overall
+    // generation timeout (hardTimeoutMs) covers the whole generate()
+    // lifecycle; this is just for the submit step.
+    const deadline = Date.now() + 30_000;
     const url = `${this.baseUrl}/v2/generate/async`;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -152,6 +156,23 @@ export class AiHordeAdapter implements AiProviderAdapter {
     clearTimeout(timeout);
 
     if (response.status >= 400) {
+      // 429 on submit is transient — back off and retry.
+      // Same pattern as the poll loop retry. The `Retry-After`
+      // header tells us how long; floor at 5 s.
+      if (response.status === 429) {
+        const retryAfterRaw = response.headers['retry-after'];
+        const retryAfterSec = retryAfterRaw
+          ? Math.max(5, Number(retryAfterRaw) || 5)
+          : 5;
+        if (Date.now() + retryAfterSec * 1000 < deadline) {
+          this.logger.warn(
+            { retryAfterSec },
+            'AI Horde submit rate-limited; backing off',
+          );
+          await this.sleep(retryAfterSec * 1000);
+          return this.submit(request);
+        }
+      }
       throw this.makeHttpError(response.status, 'submit', response);
     }
 

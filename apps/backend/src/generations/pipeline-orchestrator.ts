@@ -55,7 +55,7 @@ export class PipelineOrchestrator {
     @Inject(AI_PROVIDER_ADAPTER) private readonly activeAdapter: AiProviderAdapter,
     @Inject(PollinationsAdapter) private readonly pollinations: PollinationsAdapter,
     @Inject(MyceliAdapter) private readonly myceli: MyceliAdapter,
-    @Inject(AiHordeAdapter) _aiHorde: AiHordeAdapter,
+    @Inject(AiHordeAdapter) private readonly aiHorde: AiHordeAdapter,
     @Inject(ReplicateAdapter) _replicate: ReplicateAdapter,
     @Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter,
     @Inject(ConfigService) config: ConfigService,
@@ -141,17 +141,20 @@ export class PipelineOrchestrator {
     }
 
     if (!result && this.shouldFallback(lastError)) {
-      const fallback = this.pickFallback();
-      this.logger.warn(
-        { generationId: gen.id, fallback: fallback.name, primaryStatus: lastError?.statusCode, primaryCode: lastError?.code },
-        'attempting fallback (AI-07)',
-      );
-      try {
-        result = await fallback.generate(request);
-        lastError = null;
-      } catch (err) {
-        lastError = this.mapProviderError(err);
-        this.logger.warn({ generationId: gen.id, err: lastError }, 'fallback adapter failed');
+      const fallbacks = this.pickFallbacks();
+      for (const fallback of fallbacks) {
+        this.logger.warn(
+          { generationId: gen.id, fallback: fallback.name, primaryStatus: lastError?.statusCode, primaryCode: lastError?.code },
+          'attempting fallback (AI-07)',
+        );
+        try {
+          result = await fallback.generate(request);
+          lastError = null;
+          break; // succeeded
+        } catch (err) {
+          lastError = this.mapProviderError(err);
+          this.logger.warn({ generationId: gen.id, err: lastError }, `fallback ${fallback.name} failed`);
+        }
       }
     }
 
@@ -223,20 +226,27 @@ export class PipelineOrchestrator {
   }
 
   /**
-   * Picks a fallback adapter different from the active one. The
-   * three registered adapters are: pollinations, myceli, ai-horde.
-   * If the active is pollinations, prefer myceli (synchronous, fast)
-   * as the first fallback; if that also fails the AI-07 path stops
-   * (we don't try a third provider — that would consume the
-   * `GENERATION_HARD_TIMEOUT_MS` budget twice and surface a
-   * confusing error chain to the user).
+   * Returns the ordered list of adapters to try when the primary
+   * fails. Priority: synchronous adapters first (fast), then
+   * async (horde — only tried when all sync adapters also fail).
+   *
+   * Previously we only tried ONE fallback and stopped —
+   * `pickFallback()`. If Pollinations (first fallback) also 402'd,
+   * Horde and Myceli were never reached. Multi-level fallback
+   * fixes this: on a Replicate 402 → Pollinations → Horde →
+   * Myceli, each tried in order until one succeeds.
    */
-  private pickFallback(): AiProviderAdapter {
-    if (this.activeAdapter.name === 'pollinations') return this.myceli;
-    if (this.activeAdapter.name === 'myceli') return this.pollinations;
-    // ai-horde / replicate active → fall back to the synchronous
-    // pollinations (async+async would blow the hard-timeout budget).
-    return this.pollinations;
+  private pickFallbacks(): AiProviderAdapter[] {
+    // Priority order: sync adapters first (pollinations, myceli),
+    // then async (horde). Exclude the active adapter (it already
+    // failed). Horde is last because async would blow the timeout
+    // budget, but it's better than failing all 3 options.
+    const all: AiProviderAdapter[] = [
+      this.pollinations,
+      this.myceli,
+      this.aiHorde,
+    ];
+    return all.filter((a) => a.name !== this.activeAdapter.name);
   }
 
   private mapProviderError(err: unknown): { code: string; message: string; statusCode?: number } {
