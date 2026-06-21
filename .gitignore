@@ -25,6 +25,7 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+.env.homelab-public
 
 # IDE
 .idea/
@@ -55,7 +56,3 @@ session-*.jsonl
 *.screenshot.png
 f7-project-dashboard.png
 generations-*.png
-
-# local-only notes / brief / prompt docs (never commit)
-prompt.md
-docs/Assessment Brief.md

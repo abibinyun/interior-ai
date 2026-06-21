@@ -182,3 +182,34 @@ for "the project itself doesn't exist." Two changes:
 | 11.3 | Inspect `<main>` | `id="main-content"` |
 | 11.4 | Trigger any error | `<div role="alert">` with traceId |
 | 11.5 | Hover image thumbnail | Subtle scale transition (disabled under reduce-motion) |
+
+## §12 — Replicate Flux 2 Pro generation
+
+Flux 2 Pro is the primary provider in the homelab-public deploy. It's an async
+prediction API (~9 s per image). Verified live on 2026-06-21 via Playwright.
+
+### Sequence (observed)
+
+```
+POST /api/rooms/:id/generations  →  201  (batch created)
+POST replicate /predictions     →  { id, status: "starting" }
+GET  replicate /predictions/:id →  status: "processing"
+GET  replicate /predictions/:id →  status: "succeeded", output: "https://..."
+GET  output URL                  →  image bytes (1.6 MB PNG)
+PUT  Supabase /upload           →  200
+mark COMPLETED                   →  imageUrl in DB
+Frontend polls /batches/:id     →  3 cards with images
+```
+
+| # | Action | Expected | Pass |
+|---|---|---|---|
+| 12.1 | Click "Generate 3 options" | Cards show spinner SVG + "Generating" label (PENDING/PROCESSING) | ☑ (verified via Playwright — all 3 cards have `svg.animate-spin` + `aria-busy="true"`) |
+| 12.2 | Wait ~30 s | All 3 cards flip to COMPLETED with Flux 2 Pro images | ☑ (verified via Playwright — 3 images loaded via `/api/images/generations/...`) |
+| 12.3 | Check backend log | `replicate download complete, predictionId=..., bytes=1,639,548, contentType=image/png, provider=replicate` | ☑ (verified via `docker compose logs interior-api`) |
+| 12.4 | Open generation detail | Full-resolution image visible | ☐ |
+| 12.5 | Approve one option | Room status flips to APPROVED, green ribbon on card | ☐ |
+| 12.6 | Generate again (re-trigger) | New batch uses same Replicate provider | ☐ |
+| 12.7 | Force fallback by setting `AI_PROVIDER=ai-horde` | If Horde 429s, fallback to Pollinations | ☐ |
+| 12.8 | Verify AI Horde 429 retry | Backend log shows "AI Horde poll rate-limited; backing off" → retry after `Retry-After` → completes | ☐ |
+| 12.9 | Console errors during entire flow | 0 errors | ☑ (verified via Playwright) |
+| 12.10 | `← Room` back link | Navigates to room detail page | ☑ (verified via Playwright click) |

@@ -90,13 +90,16 @@ All knobs live in `.env` (gitignored). `.env.example` is the documented template
 
 ### AI provider (selectable per environment)
 
-`AI_PROVIDER` chooses the primary adapter; the other two are still registered and used as the AI-07 fallback when the primary fails with a transient error (timeout, 5xx, or 402/429):
+`AI_PROVIDER` chooses the primary adapter; the others are still registered and used as the AI-07 fallback when the primary fails with a transient error (timeout, 5xx, or 402/429):
 
 | `AI_PROVIDER` | Endpoint shape | Notes |
 |---|---|---|
-| `pollinations` (default) | `GET {base}/image/{prompt}?{...}` — sync, ~5–30 s | Free tier; can return `402` after burst traffic |
+| `replicate` (recommended) | `POST {base}/v1/models/{model}/predictions` → poll `/v1/predictions/{id}` — async, ~9 s | **Flux 2 Pro**. $10 free credits on signup. No hard rate limit. Register at https://replicate.com/signin |
+| `pollinations` | `GET {base}/image/{prompt}?{...}` — sync, ~5–30 s | Free tier; can return `402` after burst traffic |
+| `ai-horde` | `POST {base}/v2/generate/async` → poll `/v2/generate/status/{id}` — async, ~30–90 s | Free crowdsourced model; register at https://stablehorde.net/register. Retries on 429 during polling. |
 | `myceli` | `POST {base}/v1/generate` — sync | Requires `AI_FALLBACK_API_KEY` |
-| `ai-horde` | `POST {base}/v2/generate/async` → poll `/v2/generate/status/{id}` — async, ~30–90 s | Free crowdsourced model; register a key at https://stablehorde.net/register to skip the abyssal queue |
+
+The provider chain at submission (live deploy): **Replicate → Pollinations → AI Horde → Myceli**.
 
 The orchestrator's `shouldFallback` triggers a single fallback attempt when:
 - `PROVIDER_TIMEOUT` or `PROVIDER_BROKEN` (5xx, network)
@@ -245,15 +248,17 @@ Test discipline:
 
 ## Known shortcomings (recorded)
 
-| Area | Limitation | Workaround / next step |
+| Area | Limitation | Status |
 |---|---|---|
-| AI provider rate limits | Pollinations returns `402` after burst traffic | Two-layer fix in this release: (1) `PROVIDER_REJECTED` with `statusCode === 402 || 429` now triggers the AI-07 fallback to the other sync provider; (2) `RATE_LIMIT_GENERATIONS_MAX=50` is the recommended local-dev setting; (3) for sustained resilience, set `AI_PROVIDER=ai-horde` (crowdsourced, async, no fixed tier limit) |
-| `/api/health/ready` flake | Returns 503 intermittently during full test suite (Pollinations `healthcheck()` hits a real endpoint) | Documented in F2 review log; passes in isolation; production deploy sets the readiness check to a more lenient interval |
-| Backend Dockerfile in prod | Uses `Dockerfile.dev` (with watch + bind mount); the M18 production-parity Dockerfile is the hardened alternative | M18 ships a multi-stage prod-only image |
-| Mobile layouts (<640px) | Not validated (F11 spec defers this) | F11 polish pass would address |
-| Lighthouse a11y ≥ 90 | Not measured in CI | A `lighthouse-ci` or `axe-core` workflow is the future hardening pass |
-| Demo recording (Loom) | Not produced at submission time | Walk through the "Demo path" above |
-| Live URL | Hosted on a private home server per author preference; not on a public PaaS | Configure Coolify / Traefik / Cloudflare for the public hostname |
+| AI provider 402 | Pollinations returns `402` after burst traffic | Fixed — `PROVIDER_REJECTED` with 402/429 triggers AI-07 fallback to the other sync provider |
+| AI provider 429 | Horde returns `429` during polling | Fixed — adapter now reads `Retry-After` and backs off (same pattern as frontend rate-limit self-pacing) |
+| `/api/health/ready` flake | Returns 503 intermittently (Pollinations `healthcheck()` hits a real endpoint) | Documented in F2 review log; non-blocking; production cooldown makes it rare |
+| Backend Dockerfile in prod | Uses `Dockerfile.dev` (with watch + bind mount) | Fixed — multi-stage prod image in `infra/docker/backend/Dockerfile` |
+| Mobile layouts (<640px) | Not validated (F11 spec defers this) | Deferred per spec |
+| Lighthouse a11y ≥ 90 | Not measured in CI | Deferred |
+| Demo recording (Loom) | Not yet produced | Walk through the "Demo path" section above |
+| Live URL | Was hosted on private home server | Fixed — `https://interior.cube.my.id` is live via homelab-public (Traefik + cloudflared) |
+| Provider reliability | Single-provider dependency | Fixed — 4 providers with automatic fallback chain: Replicate → Pollinations → Horde → Myceli |
 
 ---
 

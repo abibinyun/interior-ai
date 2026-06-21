@@ -15,6 +15,7 @@ RUN npm install --workspaces --include-workspace-root \
 FROM node:20-alpine AS build
 WORKDIR /repo
 COPY --from=deps /repo/node_modules ./node_modules
+COPY --from=deps /repo/prisma ./prisma
 COPY apps/backend ./apps/backend
 COPY apps/backend/tsconfig.json ./tsconfig.json
 COPY apps/backend/tsconfig.build.json ./tsconfig.build.json
@@ -42,6 +43,9 @@ RUN apk add --no-cache openssl libc6-compat wget
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=build /repo/apps/backend/dist ./dist
 COPY --from=build /repo/apps/backend/package.json ./package.json
+# `prisma migrate deploy` (run as the one-shot interior-migrate
+# in the homelab deploy) needs the schema on disk.
+COPY --from=build /repo/prisma ./prisma
 
 EXPOSE 3000
 

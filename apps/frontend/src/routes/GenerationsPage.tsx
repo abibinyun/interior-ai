@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError } from '../lib/error';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorState } from '../components/ErrorState';
@@ -133,6 +133,12 @@ export function GenerationsPage() {
     <article className="space-y-8">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
+          <Link
+            to={`/rooms/${roomId}`}
+            className="inline-block text-sm text-stone-500 hover:text-stone-900"
+          >
+            ← Room
+          </Link>
           <h1 className="font-display text-display-md font-semibold text-stone-900">Generate</h1>
           <p className="mt-1 text-sm text-stone-500">
             Three options at a time. Pick the one that feels right.

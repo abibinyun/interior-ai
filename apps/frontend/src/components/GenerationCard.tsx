@@ -124,7 +124,28 @@ export function GenerationCard({ generation, isApproved, onApprove, approving, r
       aria-busy="true"
       className="overflow-hidden rounded-2xl border border-stone-100 bg-white shadow-sm"
     >
-      <div className="aspect-[4/3] animate-pulse bg-stone-100" aria-hidden="true" />
+      <div className="relative aspect-[4/3] animate-pulse bg-stone-100" aria-hidden="true">
+        <div className="absolute inset-0 flex items-center justify-center">
+          <svg
+            className="h-10 w-10 animate-spin text-stone-400"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <circle
+              className="opacity-25"
+              cx="12" cy="12" r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            />
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+            />
+          </svg>
+        </div>
+      </div>
       <div className="space-y-2 px-4 py-3">
         <span className="text-xs text-stone-500">Option {generation.optionIndex}</span>
         <p className="text-xs font-medium uppercase tracking-wider text-stone-400">

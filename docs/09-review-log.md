@@ -562,6 +562,58 @@ All v1 open questions are resolved. New questions raised during implementation w
 
 ---
 
+### 2026-06-21 — Round 6: Submission prep — Homelab deploy + Replicate + Horde 429 fix + UI polish
+
+- Reviewer: Project Owner (self)
+- Decision: **Approved**
+- Scope reviewed (pre-commit; not yet committed):
+  - `docker-compose.homelab-public.yml` — new homelab deploy compose. Mirrors the auto-payment pattern: own postgres, Traefik labels, join `homelab-public_web` external network, single domain with `PathPrefix(/api)`. Container names match router names exactly (Traefik v3 docker-provider requirement).
+  - `.env.homelab-public.example` — env template for the homelab deploy.
+  - `scripts/homelab-up.sh` — one-shot deploy script (up/migrate/down/status).
+  - `apps/backend/src/ai/adapters/replicate.adapter.ts` — new 4th AI adapter. Replicate's prediction API (POST → poll → download). Uses `black-forest-labs/flux-2-pro` model (≈9 s per generation). Auth via `Token ${REPLICATE_API_KEY}`.
+  - `apps/backend/src/ai/adapters/ai-horde.adapter.ts` — **429 retry fix**: when Horde returns 429 during polling, the adapter now reads the `Retry-After` header and backs off instead of throwing immediately. Floor at 5 s.
+  - `apps/backend/src/config/env.ts` — `AI_PROVIDER` enum extended to include `replicate`. New env vars: `REPLICATE_API_KEY`, `REPLICATE_MODEL`.
+  - `apps/backend/src/ai/ai.module.ts` — ReplicateAdapter registered.
+  - `apps/backend/src/generations/pipeline-orchestrator.ts` — Replicate injected and wired into `pickFallback()`. Fallback priority: pollinations → myceli, async providers → sync pollinations.
+  - `infra/docker/backend/Dockerfile` — prisma dir propagated through all build stages into runtime image (needed for `prisma migrate deploy` one-shot).
+  - `infra/docker/frontend/Dockerfile` — port 80, `VITE_API_TARGET` build arg.
+  - `infra/docker/frontend/nginx.conf` — listen 80, dropped `/api` proxy (Traefik handles it), simplified to SPA-only config.
+  - `prisma/schema.prisma` — `binaryTargets = ["native", "linux-musl-openssl-3.0.x"]` so the same Prisma client works in dev and the alpine+openssl prod runtime.
+  - `apps/backend/src/sessions/sessions.controller.ts` — cookie `Secure` flag now derived from `SESSION_COOKIE_SECURE=auto|true|false` env. `auto` checks `X-Forwarded-Proto` (set by Traefik behind cloudflared).
+  - `apps/frontend/src/routes/GenerationsPage.tsx` — added `← Room` back link (consistent with every other route page).
+  - `apps/frontend/src/components/GenerationCard.tsx` — added spinner SVG overlay on PENDING/PROCESSING cards (was pulsing skeleton, now explicit spinning indicator with `animate-spin`).
+
+- Why this is a pre-submission polish round:
+  1. **The AI provider chain was unreliable** — Pollinations returned 402 (out of credits), Horde returned 429 during polling (too many status checks). The user couldn't complete a full generation cycle. Adding Replicate (Flux 2 Pro, $10 free, no hard rate limit) as the primary and fixing Horde's 429 retry makes the chain resilient.
+  2. **The app needed a public URL** — Assessment brief requires "App must be live via a public URL at submission." `https://interior.cube.my.id` is now live via the homelab-public stack.
+  3. **UI gap** — the generations page had no back button (every other page did) and the loading state was a subtle pulse (user couldn't tell if generation was in progress).
+
+- **Provider chain at submission**:
+  ```
+  Primary:   replicate    (Flux 2 Pro, ~9 s, $10 free credits)
+  Fallback:  pollinations (sync, free tier)
+  Fallback:  ai-horde     (async, crowdsourced, 429 retry fixed)
+  Fallback:  myceli       (sync, requires API key)
+  ```
+
+- Verification (all green, pre-commit):
+  - `npm run typecheck` (all workspaces) → 0 errors
+  - `npm run lint` (all workspaces) → 0 errors / 0 warnings
+  - `npm run test:frontend` → **152/152 pass**
+  - **Playwright end-to-end** against `https://interior.cube.my.id`: landing page → create project → add room → generate 3 options → all 3 COMPLETED with Flux 2 Pro images (1.6 MB PNGs) → 0 console errors
+  - **Direct Replicate API test**: `POST /predictions` → `processing` → `succeeded` in 9 s → output URL valid
+  - **Backend log**: `replicate download complete, predictionId=..., bytes=1639548, contentType=image/png, provider=replicate`
+  - **Horde 429 retry**: confirmed in log — "AI Horde poll rate-limited; backing off" → wait → continue polling
+
+- Lessons recorded:
+  - **Replicate's auth is `Token` not `Bearer`** — like Horde's `apikey`, every provider has its own auth scheme. The adapter abstracts this.
+  - **Explicit polling backoff > throwing on 429** — same lesson as the frontend rate-limit fix. The Horde adapter now retries after `Retry-After` with a 5 s floor, so the batch has time to reach the worker before giving up.
+  - **Traefik v3 docker provider requires container name = router name** — discovered during the homelab deploy debugging. `interior-api` container → `interior-api` router works. `interior-frontend-prod` container → `interior-web` router silently fails. The exact match is the only reliable pattern.
+  - **`docker compose restart` does not re-read `.env`** — need `up -d` (recreate container) to pick up new env values. Lost 10 minutes to this during the deploy.
+  - **Assessors prefer live URLs over clone+run** — the homelab-public deploy was the right investment. The assessment can be evaluated by opening a browser tab, not by cloning a repo.
+
+---
+
 ### 2026-06-20 — Round 5: Export bundle download — signed-URL path bug
 
 - Reviewer: Project Owner (self)

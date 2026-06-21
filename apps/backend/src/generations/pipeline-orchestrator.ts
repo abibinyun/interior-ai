@@ -4,6 +4,7 @@ import { AI_PROVIDER_ADAPTER, AiProviderAdapter, GenerationRequest, GenerationRe
 import { AiHordeAdapter } from '../ai/adapters/ai-horde.adapter';
 import { MyceliAdapter } from '../ai/adapters/myceli.adapter';
 import { PollinationsAdapter } from '../ai/adapters/pollinations.adapter';
+import { ReplicateAdapter } from '../ai/adapters/replicate.adapter';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildGenerationKey, STORAGE_ADAPTER, StorageAdapter } from '../storage/storage.adapter';
 
@@ -54,14 +55,8 @@ export class PipelineOrchestrator {
     @Inject(AI_PROVIDER_ADAPTER) private readonly activeAdapter: AiProviderAdapter,
     @Inject(PollinationsAdapter) private readonly pollinations: PollinationsAdapter,
     @Inject(MyceliAdapter) private readonly myceli: MyceliAdapter,
-    // AiHordeAdapter is injected so the Nest container can resolve
-    // it (the AiModule registers it as a provider), but the
-    // orchestrator itself only needs the synchronous providers for
-    // the AI-07 fallback path — Horde's async submit+poll would
-    // blow the hard-timeout budget if used as a second-tier
-    // fallback. `aiHorde` is intentionally held only to keep DI
-    // happy; access it via `activeAdapter` when it is selected.
     @Inject(AiHordeAdapter) _aiHorde: AiHordeAdapter,
+    @Inject(ReplicateAdapter) _replicate: ReplicateAdapter,
     @Inject(STORAGE_ADAPTER) private readonly storage: StorageAdapter,
     @Inject(ConfigService) config: ConfigService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -239,9 +234,8 @@ export class PipelineOrchestrator {
   private pickFallback(): AiProviderAdapter {
     if (this.activeAdapter.name === 'pollinations') return this.myceli;
     if (this.activeAdapter.name === 'myceli') return this.pollinations;
-    // ai-horde active → fall back to the synchronous pollinations
-    // (Horde's async submit+poll already consumes the hard-timeout
-    // budget, so a second async provider is not safe).
+    // ai-horde / replicate active → fall back to the synchronous
+    // pollinations (async+async would blow the hard-timeout budget).
     return this.pollinations;
   }
 

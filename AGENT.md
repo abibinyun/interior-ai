@@ -309,6 +309,8 @@ npm run test:cov                        # coverage
 
 ---
 
-**Last updated**: 2026-06-21 (post-rounds 2–5: style 404, polling 429, env-tunable rate limit, AI Horde provider, signed-URL fix)
-**Milestone status**: M1–M18 ✅ committed (backend), F1–F12 ✅ committed (frontend). Post-F12 rounds: ✅ 429 hardening · ✅ style 404 noise fix · ✅ env-tunable rate limit · ✅ AI Horde provider + 402/429 fallback · ✅ export bundle signed-URL path fix.
-**Current phase**: All v1 milestones shipped + 4 user-reported bugs fixed. Submission prep (README polish + public deploy + Loom recording) is the current focus. Once the live URL is up, the v1 journey is done.
+**Last updated**: 2026-06-21 (pre-submission — all features + all bugs + all docs polished)
+**Milestone status**: M1–M18 ✅ (backend), F1–F12 ✅ (frontend). Post-F12: ✅ rate-limit hardening · ✅ style 404 fix · ✅ env-tunable rate limit · ✅ AI Horde + 402/429 fallback · ✅ signed-URL path fix · ✅ homelab-public deploy · ✅ Replicate adapter (Flux 2 Pro) · ✅ Horde 429 polling retry · ✅ back button + spinner UI
+**Live URL**: `https://interior.cube.my.id` — deployed via homelab-public (Traefik + cloudflared), same pattern as auto-payment
+**Provider chain**: Replicate (Flux 2 Pro, ~9s) → Pollinations → AI Horde (429 retry) → Myceli
+**Current phase**: All code done, all tests green. Waiting for user's Loom recording + submission email.

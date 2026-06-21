@@ -17,7 +17,7 @@ export class SessionsController {
   ): Promise<{ sessionId: string; createdAt: string }> {
     const existing = this.readCookie(req);
     const { id } = await this.sessions.issueOrRefresh(existing);
-    this.writeCookie(res, id);
+    this.writeCookie(req, res, id);
     const row = await this.sessions.findById(id);
     return {
       sessionId: id,
@@ -30,14 +30,28 @@ export class SessionsController {
     return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
   }
 
-  private writeCookie(res: Response, id: string): void {
-    const isProd = this.config.get<string>('NODE_ENV') === 'production';
+  private writeCookie(req: Request, res: Response, id: string): void {
+    // SESSION_COOKIE_SECURE:
+    //   auto (default) — trust X-Forwarded-Proto (set by Traefik
+    //                    behind cloudflared), fall back to req.secure.
+    //   true / false   — force the flag regardless of the request.
+    const mode = (this.config.get<string>('SESSION_COOKIE_SECURE', 'auto') ?? 'auto').toLowerCase();
+    let isHttps: boolean;
+    if (mode === 'true' || mode === '1') {
+      isHttps = true;
+    } else if (mode === 'false' || mode === '0') {
+      isHttps = false;
+    } else {
+      const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.toLowerCase();
+      isHttps = proto === 'https' || req.secure === true;
+    }
+    const sameSite = (this.config.get<string>('SESSION_COOKIE_SAMESITE', 'lax') ?? 'lax') as 'lax' | 'strict' | 'none';
     res.cookie(SessionsService.cookieName, id, {
       httpOnly: true,
-      secure: isProd,
-      sameSite: 'lax',
+      secure: isHttps,
+      sameSite,
       path: '/',
-      maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
+      maxAge: 1000 * 60 * 60 * 24 * 30,
     });
   }
 }

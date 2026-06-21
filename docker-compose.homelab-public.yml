@@ -1,0 +1,135 @@
+# Deploy interior-ai ke homelab-public (Traefik + Cloudflare tunnel).
+# Pattern mirrors /home/abibinyun/data/LATIHAN/auto-payment/docker-compose.homelab-public.yml
+#
+# Single domain with PathPrefix(/api) — same as auto-payment:
+#   ${INTERIOR_DOMAIN}/api/*  →  interior-api:3000
+#   ${INTERIOR_DOMAIN}/*      →  interior-web:80
+#
+# Container names must match Traefik router names (autopay rule).
+
+name: interior-ai-homelab
+
+services:
+  interior-api:
+    build:
+      context: .
+      dockerfile: infra/docker/backend/Dockerfile
+    image: interior-ai-backend:homelab
+    container_name: interior-api
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@interior-pg:5432/${POSTGRES_DB:-interior}?schema=public
+      - SESSION_COOKIE_NAME=sid
+      - SESSION_COOKIE_SECRET=${SESSION_COOKIE_SECRET}
+      - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-auto}
+      - CORS_ORIGINS=https://${INTERIOR_DOMAIN}
+      - TRUST_PROXY=${TRUST_PROXY:-true}
+      - AI_PROVIDER=${AI_PROVIDER:-ai-horde}
+      - AI_PRIMARY_BASE_URL=${AI_PRIMARY_BASE_URL}
+      - AI_FALLBACK_BASE_URL=${AI_FALLBACK_BASE_URL}
+      - AI_PRIMARY_API_KEY=${AI_PRIMARY_API_KEY:-}
+      - AI_FALLBACK_API_KEY=${AI_FALLBACK_API_KEY:-}
+      - AI_HORDE_BASE_URL=${AI_HORDE_BASE_URL:-https://stablehorde.net/api}
+      - AI_HORDE_API_KEY=${AI_HORDE_API_KEY:-}
+      - REPLICATE_API_KEY=${REPLICATE_API_KEY:-}
+      - REPLICATE_MODEL=${REPLICATE_MODEL:-black-forest-labs/flux-2-pro}
+      - GENERATION_TIMEOUT_MS=${GENERATION_TIMEOUT_MS:-60000}
+      - GENERATION_HARD_TIMEOUT_MS=${GENERATION_HARD_TIMEOUT_MS:-120000}
+      - STORAGE_PROVIDER=supabase
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_STORAGE_BUCKET=${SUPABASE_STORAGE_BUCKET:-generations}
+      - SIGNED_URL_TTL_SECONDS=${SIGNED_URL_TTL_SECONDS:-900}
+      - RATE_LIMIT_GENERATIONS_MAX=${RATE_LIMIT_GENERATIONS_MAX:-50}
+      - RATE_LIMIT_GENERATIONS_WINDOW_MS=${RATE_LIMIT_GENERATIONS_WINDOW_MS:-60000}
+      - RATE_LIMIT_DISABLED=${RATE_LIMIT_DISABLED:-false}
+      - MAX_REQUEST_BODY_BYTES=${MAX_REQUEST_BODY_BYTES:-102400}
+      - ENABLE_GENERATION_AUTO_TRIGGER=${ENABLE_GENERATION_AUTO_TRIGGER:-true}
+      - APP_VERSION=${APP_VERSION:-homelab}
+    depends_on:
+      interior-pg:
+        condition: service_healthy
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.interior-api.rule=Host(`${INTERIOR_DOMAIN}`) && PathPrefix(`/api`)"
+      - "traefik.http.routers.interior-api.entrypoints=web"
+      - "traefik.http.routers.interior-api.middlewares=security-headers@file"
+      - "traefik.http.services.interior-api.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health/live >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  interior-web:
+    build:
+      context: .
+      dockerfile: infra/docker/frontend/Dockerfile
+    image: interior-ai-frontend:homelab
+    container_name: interior-web
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    expose:
+      - "80"
+    depends_on:
+      - interior-api
+    networks:
+      - web
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.interior-web.rule=Host(`${INTERIOR_DOMAIN}`)"
+      - "traefik.http.routers.interior-web.entrypoints=web"
+      - "traefik.http.routers.interior-web.middlewares=security-headers@file"
+      - "traefik.http.services.interior-web.loadbalancer.server.port=80"
+
+  interior-pg:
+    image: postgres:16-alpine
+    container_name: interior-pg
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-interior}
+    volumes:
+      - interior_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-interior}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - web
+
+  # One-shot migration runner. Behind a profile so `up -d` doesn't
+  # try to start it. Run once via:
+  #   COMPOSE_PROFILES=homelab-migrate \
+  #     docker compose -f docker-compose.homelab-public.yml \
+  #       --env-file .env.homelab-public run --rm interior-migrate
+  interior-migrate:
+    image: interior-ai-backend:homelab
+    profiles: ["homelab-migrate"]
+    depends_on:
+      interior-pg:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@interior-pg:5432/${POSTGRES_DB:-interior}?schema=public
+    entrypoint: ["npx", "prisma", "migrate", "deploy", "--schema=prisma/schema.prisma"]
+    restart: "no"
+    networks:
+      - web
+
+volumes:
+  interior_pg_data:
+
+networks:
+  web:
+    external: true
+    name: homelab-public_web

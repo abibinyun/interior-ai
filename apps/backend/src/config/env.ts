@@ -13,7 +13,7 @@ const envSchema = z.object({
     .min(32, 'SESSION_COOKIE_SECRET must be at least 32 characters'),
   CORS_ORIGINS: z.string().default('http://localhost:5173'),
 
-  AI_PROVIDER: z.enum(['pollinations', 'myceli', 'ai-horde']).default('pollinations'),
+  AI_PROVIDER: z.enum(['pollinations', 'myceli', 'ai-horde', 'replicate']).default('pollinations'),
   AI_PRIMARY_BASE_URL: z.string().url(),
   AI_FALLBACK_BASE_URL: z.string().url(),
   AI_PRIMARY_API_KEY: z.string().optional().default(''),
@@ -27,6 +27,10 @@ const envSchema = z.object({
   // `apikey` header rather than a Bearer token.
   AI_HORDE_BASE_URL: z.string().url().default('https://stablehorde.net/api'),
   AI_HORDE_API_KEY: z.string().optional().default(''),
+  // Replicate (https://replicate.com/) — async prediction API.
+  // Model is configurable; defaults to Flux 2 Pro.
+  REPLICATE_API_KEY: z.string().optional().default(''),
+  REPLICATE_MODEL: z.string().default('black-forest-labs/flux-2-pro'),
   GENERATION_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
   GENERATION_HARD_TIMEOUT_MS: z.coerce.number().int().positive().default(90000),
 

@@ -204,6 +204,23 @@ export class AiHordeAdapter implements AiProviderAdapter {
       clearTimeout(timeout);
 
       if (response.status >= 400) {
+        // 429 (rate limit) during polling is transient — back off
+        // and retry instead of throwing immediately. The Retry-After
+        // header tells us how long to wait; floor at 5 s.
+        if (response.status === 429) {
+          const retryAfterRaw = response.headers['retry-after'];
+          const retryAfterSec = retryAfterRaw
+            ? Math.max(5, Number(retryAfterRaw) || 5)
+            : 5;
+          if (Date.now() + retryAfterSec * 1000 < deadline) {
+            this.logger.warn(
+              { jobId, retryAfterSec, deadlineRemainingSec: Math.ceil((deadline - Date.now()) / 1000) },
+              'AI Horde poll rate-limited; backing off',
+            );
+            await this.sleep(retryAfterSec * 1000);
+            continue;
+          }
+        }
         throw this.makeHttpError(response.status, 'poll', response);
       }
 

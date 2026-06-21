@@ -5,6 +5,10 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
+  // The prod runtime image (node:20-alpine + openssl) needs the
+  // openssl-linked Prisma engine. Without this, the backend fails
+  // with "Prisma Client could not locate the Query Engine".
+  binaryTargets  = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
