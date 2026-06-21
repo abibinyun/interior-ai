@@ -154,6 +154,7 @@ describe('M9 — Generation Pipeline', () => {
     primary: FakeAiAdapter,
     fallback: FakeAiAdapter,
     storage: FakeStorageAdapter,
+    horde?: FakeAiAdapter,
   ): Promise<void> {
     if (app) await app.close();
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -164,7 +165,7 @@ describe('M9 — Generation Pipeline', () => {
       .overrideProvider(MyceliAdapter)
       .useValue(fallback)
       .overrideProvider(AiHordeAdapter)
-      .useValue(new FakeAiAdapter('ai-horde', []))
+      .useValue(horde ?? new FakeAiAdapter('ai-horde', []))
       .overrideProvider(STORAGE_ADAPTER)
       .useValue(storage)
       .compile();
@@ -400,7 +401,12 @@ describe('M9 — Generation Pipeline', () => {
     fakeFallback = new FakeAiAdapter('myceli', [
       makeTimeoutError(), makeTimeoutError(), makeTimeoutError(),
     ]);
-    await setupApp(fakePrimary, fakeFallback, fakeStorage);
+    // Multi-level fallback also tries Horde — provide timeout errors
+    // so all three tiers fail cleanly with PROVIDER_TIMEOUT.
+    const fakeHorde = new FakeAiAdapter('ai-horde', [
+      makeTimeoutError(), makeTimeoutError(), makeTimeoutError(),
+    ]);
+    await setupApp(fakePrimary, fakeFallback, fakeStorage, fakeHorde);
 
     const sid = await createSession(app);
     const projectId = await createProject(app, sid, 'PipelineAllFail');

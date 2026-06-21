@@ -107,18 +107,24 @@ describe('AiHordeAdapter', () => {
     });
   });
 
-  it('throws PROVIDER_REJECTED on submit 429 (fallback trigger)', async () => {
+  it('retries on submit 429 (no longer throws immediately)', async () => {
+    // After the round-6 fix, the adapter backs off and retries
+    // on submit 429 instead of throwing immediately. The mock
+    // only has one scripted entry, so the retry hits the mock
+    // exhaustion error → PROVIDER_BROKEN. This test proves the
+    // adapter no longer throws PROVIDER_REJECTED at the first
+    // 429 — it retried.
     const { fetcher } = makeScriptedHttp([
       { match: (u) => u.endsWith('/v2/generate/async'), response: { status: 429, body: Buffer.from('{"message":"slow down"}') } },
     ]);
-    const adapter = new AiHordeAdapter(makeConfig(), fetcher);
+    const adapter = new AiHordeAdapter(makeConfig({ GENERATION_HARD_TIMEOUT_MS: 100 }), fetcher);
     try {
       await adapter.generate({ prompt: 'x' });
       expect.fail('should have thrown');
     } catch (err) {
       expect(isProviderError(err)).toBe(true);
-      expect((err as { code: string }).code).toBe('PROVIDER_REJECTED');
-      expect((err as { statusCode: number }).statusCode).toBe(429);
+      // The retry exhausts the mock → network error → PROVIDER_BROKEN.
+      expect((err as { code: string }).code).toBe('PROVIDER_BROKEN');
     }
   });
 
